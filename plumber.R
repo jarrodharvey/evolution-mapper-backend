@@ -11,8 +11,50 @@ rate_limit_storage <- new.env()
 rate_limit_window <- 60  # seconds
 rate_limit_max <- 60     # requests per window
 
+# API Key configuration - in production, store securely (env vars, database, etc.)
+# For demo purposes, here are some example keys
+valid_api_keys <- c(
+  "demo-key-12345",
+  "research-key-67890", 
+  "dev-key-abcde"
+)
+
+# Load API keys from environment variable if available
+if (nzchar(Sys.getenv("EVOLUTION_API_KEYS"))) {
+  env_keys <- strsplit(Sys.getenv("EVOLUTION_API_KEYS"), ",")[[1]]
+  valid_api_keys <- trimws(env_keys)
+}
+
 #* @apiTitle Evolution Mapper API
 #* @apiDescription API for generating phylogenetic trees and species data
+
+#* API Key authentication filter
+#* @filter apikey
+function(req, res) {
+  # Skip authentication for health check endpoint
+  if (req$PATH_INFO == "/api/health") {
+    plumber::forward()
+    return()
+  }
+  
+  # Get API key from header or query parameter
+  api_key <- req$HTTP_X_API_KEY %||% req$args$api_key
+  
+  # Check if API key is provided and valid
+  if (is.null(api_key) || !api_key %in% valid_api_keys) {
+    res$status <- 401  # Unauthorized
+    return(list(
+      success = FALSE,
+      error = "Invalid or missing API key. Include your API key in the 'X-API-Key' header or 'api_key' query parameter.",
+      documentation = "Contact the API administrator for access credentials."
+    ))
+  }
+  
+  # Store API key in request for potential logging/tracking
+  req$api_key <- api_key
+  
+  plumber::forward()
+}
 
 #* Rate limiting filter - prevents API abuse
 #* @filter ratelimit

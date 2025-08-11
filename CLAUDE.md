@@ -17,27 +17,36 @@ install.packages(c("plumber", "rotl", "ape", "collapsibleTree",
 ```
 
 ### Production Security Features
+- **API Key Authentication**: Required for all endpoints except health check
 - **Rate Limiting**: 60 requests per minute per IP address
 - **Input Validation**: SQL injection protection and parameter sanitization
 - **Error Handling**: Structured error responses without exposing internal details
 
 ### Testing Endpoints
 ```bash
-# Health check
+# Health check (no API key required)
 curl http://localhost:8000/api/health
 
-# Search species (recommended for frontend)
-curl "http://localhost:8000/api/species?search=whale&limit=7"
-curl "http://localhost:8000/api/species?search=human&limit=3"
+# Search species with API key in header
+curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/species?search=whale&limit=7"
 
-# Get species without search (limited to 50 by default)
-curl "http://localhost:8000/api/species?limit=10"
+# Search species with API key as query parameter
+curl "http://localhost:8000/api/species?api_key=demo-key-12345&search=human&limit=3"
 
 # Generate tree
-curl -X POST -d "species=Human,Dog,Cat" http://localhost:8000/api/tree
+curl -X POST -H "X-API-Key: demo-key-12345" -d "species=Human,Dog,Cat" http://localhost:8000/api/tree
 
 # Random tree
-curl "http://localhost:8000/api/random-tree?count=3"
+curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/random-tree?count=3"
+```
+
+### API Key Configuration
+```r
+# Default demo keys (for development only)
+valid_api_keys <- c("demo-key-12345", "research-key-67890", "dev-key-abcde")
+
+# Production: Set environment variable with comma-separated keys
+Sys.setenv(EVOLUTION_API_KEYS = "prod-key-1,prod-key-2,special-research-key")
 ```
 
 ### Code Quality
