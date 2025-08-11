@@ -41,13 +41,24 @@ curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/random-tree?count
 ```
 
 ### API Key Configuration
-```r
-# Default demo keys (for development only)
-valid_api_keys <- c("demo-key-12345", "research-key-67890", "dev-key-abcde")
 
-# Production: Set environment variable with comma-separated keys
-Sys.setenv(EVOLUTION_API_KEYS = "prod-key-1,prod-key-2,special-research-key")
+**Setup (.Renviron file):**
+1. Copy `.Renviron.example` to `.Renviron`
+2. Edit `.Renviron` with your API keys:
+```bash
+# .Renviron
+EVOLUTION_API_KEYS=your-key-1,your-key-2,your-key-3
 ```
+
+**Development Keys (included in .Renviron):**
+- `demo-key-12345`
+- `research-key-67890` 
+- `dev-key-abcde`
+
+**Security Notes:**
+- `.Renviron` is excluded from version control (.gitignore)
+- Use `.Renviron.example` as a template for new deployments
+- For production: generate secure, unique API keys
 
 ### Code Quality
 ```r

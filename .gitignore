@@ -1,29 +1,24 @@
-# R specific
+# R specific files
 .Rhistory
 .Rapp.history
 .RData
 .Ruserdata
-*.rdb
-*.rdx
+
+# Environment variables (contains sensitive API keys)
+.Renviron
 
 # Temporary files
 *.tmp
 *.temp
-*~
-
-# Test output files
-*_tree.html
-test_response.json
-
-# IDE files
-.vscode/
-.idea/
-*.swp
-
-# OS files
-.DS_Store
-Thumbs.db
 
 # Logs
 *.log
-EOF < /dev/null
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+*.Rproj
+*.Rproj.user/

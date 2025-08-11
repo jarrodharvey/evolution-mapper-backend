@@ -1,0 +1,8 @@
+# Evolution Mapper API Configuration Template
+# Copy this file to .Renviron and update with your actual API keys
+
+# API Keys - comma-separated list of valid keys
+EVOLUTION_API_KEYS=your-api-key-1,your-api-key-2,your-api-key-3
+
+# Example production keys format:
+# EVOLUTION_API_KEYS=prod-key-abc123,research-key-def456,admin-key-ghi789

@@ -11,18 +11,16 @@ rate_limit_storage <- new.env()
 rate_limit_window <- 60  # seconds
 rate_limit_max <- 60     # requests per window
 
-# API Key configuration - in production, store securely (env vars, database, etc.)
-# For demo purposes, here are some example keys
-valid_api_keys <- c(
-  "demo-key-12345",
-  "research-key-67890", 
-  "dev-key-abcde"
-)
+# API Key configuration from .Renviron file
+# Load API keys from environment variable (set in .Renviron)
+api_keys_env <- Sys.getenv("EVOLUTION_API_KEYS")
 
-# Load API keys from environment variable if available
-if (nzchar(Sys.getenv("EVOLUTION_API_KEYS"))) {
-  env_keys <- strsplit(Sys.getenv("EVOLUTION_API_KEYS"), ",")[[1]]
-  valid_api_keys <- trimws(env_keys)
+if (nzchar(api_keys_env)) {
+  valid_api_keys <- trimws(strsplit(api_keys_env, ",")[[1]])
+} else {
+  # Fallback keys if .Renviron not found (not recommended for production)
+  warning("No EVOLUTION_API_KEYS environment variable found. Using fallback demo keys.")
+  valid_api_keys <- c("demo-key-12345", "research-key-67890", "dev-key-abcde")
 }
 
 #* @apiTitle Evolution Mapper API
