@@ -16,6 +16,11 @@ install.packages(c("plumber", "rotl", "ape", "collapsibleTree",
                    "htmlwidgets", "RSQLite", "DBI", "dplyr"))
 ```
 
+### Production Security Features
+- **Rate Limiting**: 60 requests per minute per IP address
+- **Input Validation**: SQL injection protection and parameter sanitization
+- **Error Handling**: Structured error responses without exposing internal details
+
 ### Testing Endpoints
 ```bash
 # Health check

@@ -6,8 +6,49 @@ library(plumber)
 # Source tree generation functions
 source("functions/tree_generation.R")
 
+# Simple in-memory rate limiting - tracks requests per IP
+rate_limit_storage <- new.env()
+rate_limit_window <- 60  # seconds
+rate_limit_max <- 60     # requests per window
+
 #* @apiTitle Evolution Mapper API
 #* @apiDescription API for generating phylogenetic trees and species data
+
+#* Rate limiting filter - prevents API abuse
+#* @filter ratelimit
+function(req, res) {
+  # Use IP address as the identifier for rate limiting
+  client_ip <- req$REMOTE_ADDR %||% "unknown"
+  current_time <- as.numeric(Sys.time())
+  
+  # Get or initialize request history for this IP
+  if (!exists(client_ip, envir = rate_limit_storage)) {
+    rate_limit_storage[[client_ip]] <- list()
+  }
+  
+  # Get request timestamps for this IP
+  ip_requests <- rate_limit_storage[[client_ip]]
+  
+  # Remove requests outside the time window
+  cutoff_time <- current_time - rate_limit_window
+  ip_requests <- ip_requests[ip_requests > cutoff_time]
+  
+  # Check if rate limit exceeded
+  if (length(ip_requests) >= rate_limit_max) {
+    res$status <- 429  # Too Many Requests
+    return(list(
+      success = FALSE,
+      error = "Rate limit exceeded. Maximum 60 requests per minute allowed.",
+      retry_after = 60
+    ))
+  }
+  
+  # Add current request timestamp
+  ip_requests <- c(ip_requests, current_time)
+  rate_limit_storage[[client_ip]] <- ip_requests
+  
+  plumber::forward()
+}
 
 #* Health check endpoint
 #* @get /api/health
