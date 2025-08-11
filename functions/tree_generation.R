@@ -308,14 +308,31 @@ get_random_species <- function(count = sample(3:7, 1)) {
   return(random_species$common)
 }
 
-# Function to get all unique common names for species picker
-get_all_species_names <- function() {
+# Function to search species with optional search term and limit
+search_species <- function(search_term = NULL, limit = 50) {
   db_path <- "data/species.sqlite"
   species_db <- dbConnect(SQLite(), db_path)
   
-  query <- "SELECT DISTINCT common FROM species WHERE common IS NOT NULL AND common != '' ORDER BY common"
-  species_names <- dbGetQuery(species_db, query)
+  if (!is.null(search_term) && search_term != "") {
+    # Search for species matching the term (case insensitive)
+    search_term <- gsub("'", "''", search_term)  # Escape single quotes for SQL safety
+    query <- paste0(
+      "SELECT DISTINCT common, scientific, ott FROM species ",
+      "WHERE common IS NOT NULL AND common != '' ",
+      "AND LOWER(common) LIKE LOWER('%", search_term, "%') ",
+      "ORDER BY common LIMIT ", limit
+    )
+  } else {
+    # Return limited results without search
+    query <- paste0(
+      "SELECT DISTINCT common, scientific, ott FROM species ",
+      "WHERE common IS NOT NULL AND common != '' ",
+      "ORDER BY common LIMIT ", limit
+    )
+  }
+  
+  species_data <- dbGetQuery(species_db, query)
   dbDisconnect(species_db)
   
-  return(species_names$common)
+  return(species_data)
 }

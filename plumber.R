@@ -29,20 +29,32 @@ function(msg = "Hello World") {
   )
 }
 
-#* Get all unique species common names for frontend picker
+#* Search species by name with optional limit for frontend picker
+#* @param search Optional search term to filter species names
+#* @param limit Optional limit for number of results (default 50, max 100)
 #* @get /api/species
-function() {
+function(search = NULL, limit = 50) {
   tryCatch({
-    species_names <- get_all_species_names()
+    # Validate and sanitize limit parameter
+    limit <- as.numeric(limit)
+    if (is.na(limit) || limit < 1) {
+      limit <- 50
+    } else if (limit > 100) {
+      limit <- 100  # Prevent excessive results
+    }
+    
+    species_data <- search_species(search, limit)
     list(
       success = TRUE,
-      count = length(species_names),
-      species = species_names
+      count = nrow(species_data),
+      search_term = search,
+      limit_applied = limit,
+      species = species_data
     )
   }, error = function(e) {
     list(
       success = FALSE,
-      error = paste("Error fetching species:", conditionMessage(e))
+      error = paste("Error searching species:", conditionMessage(e))
     )
   })
 }
