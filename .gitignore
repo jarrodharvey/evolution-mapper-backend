@@ -1,0 +1,29 @@
+# R specific
+.Rhistory
+.Rapp.history
+.RData
+.Ruserdata
+*.rdb
+*.rdx
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# Test output files
+*_tree.html
+test_response.json
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+EOF < /dev/null
