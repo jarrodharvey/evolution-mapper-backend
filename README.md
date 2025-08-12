@@ -115,6 +115,9 @@ curl -X POST -H "X-API-Key: demo-key-12345" -d "species=Human,Dog,Cat" http://lo
 
 # Random tree
 curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/random-tree?count=3"
+
+# Generate random tree and save to HTML file for viewing
+curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/random-tree?count=5" | jq -r '.html[0]' > random_tree.html
 ```
 
 ## Deployment
