@@ -546,7 +546,8 @@ generate_tree_html_direct <- function(common_names) {
   }, error = function(e) {
     return(list(
       success = FALSE,
-      error = paste("Error generating tree:", conditionMessage(e))
+      error = paste("Error generating tree:", conditionMessage(e)),
+      html = NULL
     ))
   })
 }
@@ -559,7 +560,8 @@ generate_tree_html <- function(common_names) {
     if (is.null(hierarchy_data) || nrow(hierarchy_data) < 2) {
       return(list(
         success = FALSE,
-        error = "Unable to generate hierarchy data or insufficient species"
+        error = "Unable to generate hierarchy data or insufficient species",
+html = NULL
       ))
     }
     
@@ -690,7 +692,8 @@ generate_tree_html <- function(common_names) {
     if (nrow(network_data) < 2) {
       return(list(
         success = FALSE,
-        error = "Insufficient network data for tree generation"
+        error = "Insufficient network data for tree generation",
+html = NULL
       ))
     }
     
@@ -753,7 +756,8 @@ generate_tree_html <- function(common_names) {
   }, error = function(e) {
     return(list(
       success = FALSE,
-      error = paste("Error generating tree:", conditionMessage(e))
+      error = paste("Error generating tree:", conditionMessage(e)),
+      html = NULL
     ))
   })
 }
