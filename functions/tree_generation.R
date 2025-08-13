@@ -787,19 +787,29 @@ search_species <- function(search_term = NULL, limit = 50) {
   
   if (!is.null(search_term) && search_term != "") {
     # Search for species matching the term (case insensitive)
+    # Randomly select one scientific name per common name to avoid duplicates
     search_term <- gsub("'", "''", search_term)  # Escape single quotes for SQL safety
     query <- paste0(
-      "SELECT DISTINCT common, scientific, ott FROM species ",
+      "SELECT common, scientific, ott FROM (",
+      "SELECT common, scientific, ott, ",
+      "ROW_NUMBER() OVER (PARTITION BY common ORDER BY RANDOM()) as rn ",
+      "FROM species ",
       "WHERE common IS NOT NULL AND common != '' ",
       "AND LOWER(common) LIKE LOWER('%", search_term, "%') ",
-      "ORDER BY common LIMIT ", limit
+      ") WHERE rn = 1 ",
+      "ORDER BY LENGTH(common), common LIMIT ", limit
     )
   } else {
     # Return limited results without search
+    # Randomly select one scientific name per common name to avoid duplicates
     query <- paste0(
-      "SELECT DISTINCT common, scientific, ott FROM species ",
+      "SELECT common, scientific, ott FROM (",
+      "SELECT common, scientific, ott, ",
+      "ROW_NUMBER() OVER (PARTITION BY common ORDER BY RANDOM()) as rn ",
+      "FROM species ",
       "WHERE common IS NOT NULL AND common != '' ",
-      "ORDER BY common LIMIT ", limit
+      ") WHERE rn = 1 ",
+      "ORDER BY LENGTH(common), common LIMIT ", limit
     )
   }
   
