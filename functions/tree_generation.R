@@ -90,7 +90,7 @@ trace_path_to_root <- function(tip_number, edges, node_labels, tip_labels, speci
         
         # Handle unnamed nodes
         if (grepl("^mrcaott[0-9]+ott[0-9]+$", raw_name) || raw_name == "") {
-          readable_name <- "Ancestor"
+          readable_name <- paste("Ancestor", LETTERS[parent_idx])
         } else {
           readable_name <- convert_to_readable_name(raw_name)
         }
@@ -248,7 +248,7 @@ convert_phylo_to_network <- function(phylo_tree, species_data) {
       
       # Clean up node labels - make unnamed ancestors unique
       if (grepl("^mrcaott[0-9]+ott[0-9]+$", raw_name) || raw_name == "") {
-        readable_name <- paste("Ancestor", i, sep = "_")  # Make unique
+        readable_name <- paste("Ancestor", LETTERS[i])  # Make unique with letters
       } else {
         # Remove OTT IDs and convert to readable name
         clean_name <- gsub(" ott[0-9]+$", "", raw_name)
@@ -281,7 +281,7 @@ convert_phylo_to_network <- function(phylo_tree, species_data) {
       child_type <- "species"
       child_color <- "#27AE60"  # Green for species
     } else {
-      if (grepl("^\\s*ancestor\\s*$", child_label, ignore.case = TRUE)) {
+      if (grepl("^Ancestor [A-Z]$", child_label)) {
         child_type <- "ancestor"
         child_color <- "#3498DB"  # Blue for ancestors
       } else {
@@ -588,7 +588,7 @@ html = NULL
     node_colors <- sapply(all_unique_nodes, function(node) {
       if (node == "Common ancestor - click me!") {
         return("#E74C3C")  # Red for root
-      } else if (node == "Ancestor") {
+      } else if (grepl("^Ancestor [A-Z]$", node)) {
         return("#3498DB")  # Blue for ancestor nodes
       } else if (node %in% hierarchy_data$Species) {
         return("#27AE60")  # Green for species
@@ -662,8 +662,8 @@ html = NULL
         # Determine child node type with robust ancestor detection
         if (child == root_name) {
           child_type <- "root"
-        } else if (grepl("^\\s*ancestor\\s*$", child, ignore.case = TRUE)) {
-          child_type <- "ancestor"  # Flexible matching for any "ancestor" variation
+        } else if (grepl("^Ancestor [A-Z]$", child)) {
+          child_type <- "ancestor"  # Match new letter-based ancestor naming
         } else if (child %in% hierarchy_data$Species) {
           child_type <- "species"
         } else {
