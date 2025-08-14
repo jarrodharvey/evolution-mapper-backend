@@ -60,15 +60,15 @@ function(req, res) {
     return()
   }
   
-  # Get API key from header or query parameter
-  api_key <- req$HTTP_X_API_KEY %||% req$args$api_key
+  # Get API key from header only (more secure than query parameters)
+  api_key <- req$HTTP_X_API_KEY
   
   # Check if API key is provided and valid
   if (is.null(api_key) || !api_key %in% valid_api_keys) {
     res$status <- 401  # Unauthorized
     return(list(
       success = FALSE,
-      error = "Invalid or missing API key. Include your API key in the 'X-API-Key' header or 'api_key' query parameter.",
+      error = "Invalid or missing API key. Include your API key in the 'X-API-Key' header.",
       documentation = "Contact the API administrator for access credentials."
     ))
   }
