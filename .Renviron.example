@@ -6,3 +6,6 @@ EVOLUTION_API_KEYS=your-api-key-1,your-api-key-2,your-api-key-3
 
 # Example production keys format:
 # EVOLUTION_API_KEYS=prod-key-abc123,research-key-def456,admin-key-ghi789
+
+# CORS Configuration - comma-separated list of allowed origins
+CORS_ALLOWED_ORIGINS=http://localhost:3000,https://jarrod-evolution-mapper-app.com

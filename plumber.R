@@ -3,9 +3,24 @@
 
 #* @filter cors
 function(req, res) {
-  res$setHeader("Access-Control-Allow-Origin", "http://localhost:3000")
+  # Get allowed origins from environment variable, fallback to localhost
+  cors_origins <- Sys.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
+  allowed_origins <- trimws(strsplit(cors_origins, ",")[[1]])
+  
+  # Get the origin from the request
+  origin <- req$HTTP_ORIGIN
+  
+  # Set CORS headers if origin is allowed
+  if (!is.null(origin) && origin %in% allowed_origins) {
+    res$setHeader("Access-Control-Allow-Origin", origin)
+  } else if (is.null(origin) && length(allowed_origins) > 0) {
+    # Fallback for requests without origin header (like Postman)
+    res$setHeader("Access-Control-Allow-Origin", allowed_origins[1])
+  }
+  
   res$setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-  res$setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+  res$setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-API-Key")
+  
   if (req$REQUEST_METHOD == "OPTIONS") {
     res$status <- 200
     return(list())
