@@ -150,7 +150,7 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
   tryCatch({
     # Install system dependencies
     cat("Installing system dependencies...\n")
-    ubuntu_apt_get_install(droplet, "libcurl4-openssl-dev", "libssl-dev", "libxml2-dev", "libsqlite3-dev")
+    ubuntu_apt_get_install(droplet, "libcurl4-openssl-dev", "libssl-dev", "libxml2-dev", "libsqlite3-dev", "pandoc")
     
     # Install R packages
     required_packages <- c("plumber", "rlang", "rotl", "ape", "collapsibleTree", "htmlwidgets", "RSQLite", "DBI", "dplyr")
@@ -211,6 +211,7 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
       "[Service]",
       paste0("Environment=\"EVOLUTION_API_KEYS=", evolution_api_keys, "\""),
       paste0("Environment=\"CORS_ALLOWED_ORIGINS=", cors_origins, "\""),
+      "Environment=\"HOME=/var/plumber/evolution-mapper\"",
       "EOF'",
       "sudo systemctl daemon-reload",
       "sudo systemctl restart plumber-evolution-mapper"

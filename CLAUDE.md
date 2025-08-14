@@ -11,10 +11,16 @@ pr("plumber.R") %>% pr_run(port = 8000)
 ```
 
 ### Install Dependencies
+
+**R Packages:**
 ```r
-install.packages(c("plumber", "rotl", "ape", "collapsibleTree", 
+install.packages(c("plumber", "rlang", "rotl", "ape", "collapsibleTree", 
                    "htmlwidgets", "RSQLite", "DBI", "dplyr"))
 ```
+
+**System Dependencies (for production):**
+- `pandoc` - Required for HTML widget generation
+- `libcurl4-openssl-dev`, `libssl-dev`, `libxml2-dev`, `libsqlite3-dev` - R package compilation
 
 ### Production Security Features
 - **API Key Authentication**: Required for all endpoints except health check
