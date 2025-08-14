@@ -38,6 +38,9 @@ curl -X POST -H "X-API-Key: demo-key-12345" -d "species=Human,Dog,Cat" http://lo
 
 # Random tree
 curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/random-tree?count=3"
+
+# Get legend information for tree colors
+curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/legend"
 ```
 
 ### API Key Configuration
@@ -72,7 +75,7 @@ lint("functions/tree_generation.R")
 ## Architecture Overview
 
 ### Core Components
-- **plumber.R**: Main API server with REST endpoints (`/api/health`, `/api/species`, `/api/tree`, `/api/random-tree`)
+- **plumber.R**: Main API server with REST endpoints (`/api/health`, `/api/legend`, `/api/species`, `/api/tree`, `/api/random-tree`)
 - **functions/tree_generation.R**: Core phylogenetic tree logic and HTML generation
 - **data/species.sqlite**: Species database (90,276+ records with OTT IDs, common names, scientific names)
 
@@ -80,6 +83,7 @@ lint("functions/tree_generation.R")
 - **GET /api/species?search=term&limit=N**: Search species by name (case-insensitive, default limit 50, max 100)
 - **POST /api/tree**: Generate phylogenetic tree from species list
 - **GET /api/random-tree?count=N**: Generate random tree for testing
+- **GET /api/legend**: Get legend information for tree visualization colors and node types
 - **GET /api/health**: Health check endpoint
 
 ### Key Functions

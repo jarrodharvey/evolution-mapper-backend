@@ -1,7 +1,17 @@
 # Evolution Mapper - Distributed Backend API
 # R Plumber API for serving phylogenetic tree data
 
-library(plumber)
+#* @filter cors
+function(req, res) {
+  res$setHeader("Access-Control-Allow-Origin", "http://localhost:3000")
+  res$setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+  res$setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+  if (req$REQUEST_METHOD == "OPTIONS") {
+    res$status <- 200
+    return(list())
+  }
+  forward()
+}
 
 # Source tree generation functions
 source("functions/tree_generation.R")
@@ -31,7 +41,7 @@ if (nzchar(api_keys_env)) {
 function(req, res) {
   # Skip authentication for health check endpoint
   if (req$PATH_INFO == "/api/health") {
-    plumber::forward()
+    forward()
     return()
   }
   
@@ -51,7 +61,7 @@ function(req, res) {
   # Store API key in request for potential logging/tracking
   req$api_key <- api_key
   
-  plumber::forward()
+  forward()
 }
 
 #* Rate limiting filter - prevents API abuse
@@ -87,7 +97,7 @@ function(req, res) {
   ip_requests <- c(ip_requests, current_time)
   rate_limit_storage[[client_ip]] <- ip_requests
   
-  plumber::forward()
+  forward()
 }
 
 #* Health check endpoint
@@ -97,6 +107,44 @@ function() {
     status = "ok",
     message = "Evolution Mapper API is running",
     timestamp = Sys.time()
+  )
+}
+
+#* Get legend information for tree visualization colors
+#* @get /api/legend
+function() {
+  list(
+    success = TRUE,
+    legend = list(
+      list(
+        node_type = "root",
+        label = "Root Ancestor",
+        color = "#E74C3C",
+        color_name = "Red",
+        description = "Common ancestor of all species in the tree"
+      ),
+      list(
+        node_type = "ancestor",
+        label = "Evolutionary Ancestor", 
+        color = "#3498DB",
+        color_name = "Blue",
+        description = "Unnamed evolutionary ancestors"
+      ),
+      list(
+        node_type = "taxonomic",
+        label = "Taxonomic Group",
+        color = "#F39C12", 
+        color_name = "Orange",
+        description = "Named taxonomic groups (families, orders, etc.)"
+      ),
+      list(
+        node_type = "species",
+        label = "Species",
+        color = "#27AE60",
+        color_name = "Green", 
+        description = "Individual species (leaf nodes)"
+      )
+    )
   )
 }
 
@@ -172,6 +220,37 @@ function(req, species = NULL) {
   
   result <- generate_tree_html(species_list)
   return(result)
+}
+
+#* Get random species names for frontend picker
+#* @param count Number of species (3-20, default random)
+#* @get /api/random-species
+function(count = NULL) {
+  if (!is.null(count)) {
+    count <- as.numeric(count)
+    if (is.na(count) || count < 3 || count > 20) {
+      return(list(
+        success = FALSE,
+        error = "Count must be between 3 and 20"
+      ))
+    }
+  } else {
+    count <- sample(3:7, 1)
+  }
+  
+  tryCatch({
+    random_species <- get_random_species(count)
+    return(list(
+      success = TRUE,
+      count = length(random_species),
+      species = random_species
+    ))
+  }, error = function(e) {
+    return(list(
+      success = FALSE,
+      error = paste("Error getting random species:", conditionMessage(e))
+    ))
+  })
 }
 
 #* Generate random phylogenetic tree for testing

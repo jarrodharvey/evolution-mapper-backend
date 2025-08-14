@@ -25,3 +25,7 @@ Thumbs.db
 
 # Screenshots directory
 screenshots/
+
+# Claude directory
+claude/
+.claude/
