@@ -3,29 +3,23 @@
 .Rapp.history
 .RData
 .Ruserdata
-
 # Environment variables (contains sensitive API keys)
 .Renviron
-
 # Temporary files
 *.tmp
 *.temp
-
 # Logs
 *.log
-
 # OS specific files
 .DS_Store
 Thumbs.db
-
 # IDE files
 .vscode/
 *.Rproj
 *.Rproj.user/
-
 # Screenshots directory
 screenshots/
-
 # Claude directory
 claude/
 .claude/
+.httr-oauth

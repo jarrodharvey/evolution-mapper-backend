@@ -21,7 +21,7 @@ echo "Generating random tree with $COUNT species..."
 echo "Output will be saved to: $OUTPUT_FILE"
 
 # Generate the tree with improved JSON handling
-curl -v -H "X-API-Key: demo-key-12345" \
+curl -v -H "X-API-Key: ${API_KEY:-YOUR-API-KEY}" \
     "http://localhost:8000/api/random-tree?count=$COUNT" \
     | jq -r 'if .html then .html[0] else "null" end' > "$OUTPUT_FILE"
 

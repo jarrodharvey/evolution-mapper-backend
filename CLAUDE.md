@@ -28,19 +28,19 @@ install.packages(c("plumber", "rotl", "ape", "collapsibleTree",
 curl http://localhost:8000/api/health
 
 # Search species with API key in header
-curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/species?search=whale&limit=7"
+curl -H "X-API-Key: YOUR-API-KEY" "http://localhost:8000/api/species?search=whale&limit=7"
 
 # Search species with API key as query parameter
-curl "http://localhost:8000/api/species?api_key=demo-key-12345&search=human&limit=3"
+curl "http://localhost:8000/api/species?api_key=YOUR-API-KEY&search=human&limit=3"
 
 # Generate tree
-curl -X POST -H "X-API-Key: demo-key-12345" -d "species=Human,Dog,Cat" http://localhost:8000/api/tree
+curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "species=Human,Dog,Cat" http://localhost:8000/api/tree
 
 # Random tree
-curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/random-tree?count=3"
+curl -H "X-API-Key: YOUR-API-KEY" "http://localhost:8000/api/random-tree?count=3"
 
 # Get legend information for tree colors
-curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/legend"
+curl -H "X-API-Key: YOUR-API-KEY" "http://localhost:8000/api/legend"
 ```
 
 ### API Key Configuration
@@ -53,10 +53,11 @@ curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/legend"
 EVOLUTION_API_KEYS=your-key-1,your-key-2,your-key-3
 ```
 
-**Development Keys (included in .Renviron):**
-- `demo-key-12345`
-- `research-key-67890` 
-- `dev-key-abcde`
+**Development Keys:**
+Configure your own secure API keys in `.Renviron`. For development, you can use keys like:
+- `your-dev-key-123`
+- `your-test-key-456`
+- `your-api-key-789`
 
 **Security Notes:**
 - `.Renviron` is excluded from version control (.gitignore)

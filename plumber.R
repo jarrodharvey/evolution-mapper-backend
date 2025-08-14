@@ -43,9 +43,8 @@ api_keys_env <- Sys.getenv("EVOLUTION_API_KEYS")
 if (nzchar(api_keys_env)) {
   valid_api_keys <- trimws(strsplit(api_keys_env, ",")[[1]])
 } else {
-  # Fallback keys if .Renviron not found (not recommended for production)
-  warning("No EVOLUTION_API_KEYS environment variable found. Using fallback demo keys.")
-  valid_api_keys <- c("demo-key-12345", "research-key-67890", "dev-key-abcde")
+  # No fallback keys for security - require proper configuration
+  stop("EVOLUTION_API_KEYS environment variable not found. Please configure API keys in .Renviron file.")
 }
 
 #* @apiTitle Evolution Mapper API

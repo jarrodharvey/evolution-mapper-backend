@@ -14,7 +14,7 @@ A phylogenetic tree generation API built with R Plumber, providing interactive C
 
 ## API Endpoints
 
-**Note**: All endpoints except `/api/health` require API key authentication via `X-API-Key` header or `api_key` query parameter.
+**Note**: All endpoints except `/api/health` require API key authentication via `X-API-Key` header for security.
 
 ### Health Check
 ```
@@ -47,6 +47,13 @@ Headers: X-API-Key: your-api-key
 ```
 Generates tree with random species for testing.
 
+### Legend Information
+```
+GET /api/legend
+Headers: X-API-Key: your-api-key
+```
+Returns color coding information for tree visualization nodes.
+
 ## Project Structure
 
 ```
@@ -56,6 +63,8 @@ backend/
 │   └── tree_generation.R  # Core tree generation logic
 ├── data/
 │   └── species.sqlite     # Species database (90k+ records)
+├── provision_server.R     # Automated DigitalOcean deployment
+├── .Renviron.example      # Environment configuration template
 └── README.md
 ```
 
@@ -63,6 +72,7 @@ backend/
 
 Required R packages:
 - `plumber` - API framework
+- `rlang` - Required for %||% operator
 - `rotl` - Open Tree of Life integration
 - `ape` - Phylogenetic tree handling
 - `collapsibleTree` - Interactive tree visualization
@@ -90,7 +100,7 @@ EVOLUTION_API_KEYS=your-key-1,your-key-2,your-key-3
 
 ```r
 # Install dependencies
-install.packages(c("plumber", "rotl", "ape", "collapsibleTree", 
+install.packages(c("plumber", "rlang", "rotl", "ape", "collapsibleTree", 
                    "htmlwidgets", "RSQLite", "DBI", "dplyr"))
 
 # Run API server
@@ -107,8 +117,8 @@ curl http://localhost:8000/api/health
 # Search species with API key in header
 curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/species?search=whale&limit=7"
 
-# Search species with API key as query parameter
-curl "http://localhost:8000/api/species?api_key=demo-key-12345&search=human&limit=3"
+# Legend information
+curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/legend"
 
 # Generate tree
 curl -X POST -H "X-API-Key: demo-key-12345" -d "species=Human,Dog,Cat" http://localhost:8000/api/tree
@@ -120,9 +130,46 @@ curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/random-tree?count
 curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/random-tree?count=5" | jq -r '.html[0]' > random_tree.html
 ```
 
-## Deployment
+## Production Deployment
 
-This API is designed to work with `plumberDeploy` for cloud deployment or can be containerized with Docker.
+### Automated DigitalOcean Deployment
+
+Use the included provisioning script for one-command deployment:
+
+```bash
+# Deploy to first available droplet with firewall protection
+Rscript provision_server.R "" "YOUR_IP_ADDRESS"
+
+# Deploy to specific droplet
+Rscript provision_server.R "droplet-name" "SOURCE_IP_ADDRESS"
+```
+
+**Prerequisites:**
+1. DigitalOcean API token in `.Renviron` as `DO_PAT`
+2. API keys configured in `.Renviron` as `EVOLUTION_API_KEYS`
+3. R packages: `analogsea`, `plumberDeploy`
+
+The script automatically:
+- Installs R and system dependencies
+- Deploys the API with systemd service
+- Configures secure firewall (SSH + API access only)
+- Verifies deployment with health checks
+
+### Production API Access
+
+**Server**: `DROPLET_ADDRESS:8000`
+
+```bash
+# Health check
+curl "http://DROPLET_ADDRESS:8000/api/health"
+
+# Authenticated endpoints
+curl -H "X-API-Key: demo-key-12345" "http://DROPLET_ADDRESS:8000/api/species?search=human&limit=3"
+```
+
+### Manual Deployment
+
+Alternative deployment options include `plumberDeploy` or Docker containerization.
 
 ## Color Coding
 
