@@ -9,6 +9,23 @@ library(RSQLite)
 library(DBI)
 library(dplyr)
 
+# Calculate dynamic link length based on label lengths
+calculate_dynamic_link_length <- function(network_data, base_length = 150, char_multiplier = 12) {
+  # Get all node names
+  all_names <- c(network_data$source, network_data$target)
+  
+  # Find the longest label
+  max_chars <- max(nchar(all_names), na.rm = TRUE)
+  
+  # Calculate dynamic length: base + (characters * multiplier)
+  dynamic_length <- base_length + (max_chars * char_multiplier)
+  
+  # Set reasonable bounds (minimum 180, maximum 500)
+  dynamic_length <- max(180, min(500, dynamic_length))
+  
+  return(dynamic_length)
+}
+
 # Function to get species from database
 get_species_from_db <- function(common_names) {
   db_path <- "data/species.sqlite"
@@ -513,6 +530,9 @@ generate_tree_html_direct <- function(common_names) {
     # Convert phylo tree directly to network format - NO hierarchical levels!
     network_data <- convert_phylo_to_network(phylo_tree, species_data)
     
+    # Calculate dynamic link length based on label lengths
+    dynamic_link_length <- calculate_dynamic_link_length(network_data)
+    
     # Create collapsibleTree
     tree <- collapsibleTreeNetwork(
       network_data,
@@ -523,7 +543,7 @@ generate_tree_html_direct <- function(common_names) {
       zoomable = TRUE,
       fontSize = 12,
       tooltip = TRUE,
-      linkLength = 120,
+      linkLength = dynamic_link_length,
       collapsed = TRUE,
       nodeSize = "leafCount"
     )
@@ -720,6 +740,9 @@ html = NULL
     # Prepend root row to network data
     network_data <- rbind(root_row, network_data)
     
+    # Calculate dynamic link length based on label lengths
+    dynamic_link_length <- calculate_dynamic_link_length(network_data)
+    
     tree <- collapsibleTreeNetwork(
       network_data,
       attribute = "NodeType",
@@ -729,7 +752,7 @@ html = NULL
       zoomable = TRUE,
       fontSize = 12,
       tooltip = TRUE,
-      linkLength = 120,
+      linkLength = dynamic_link_length,
       collapsed = TRUE,
       nodeSize = "leafCount"
     )
