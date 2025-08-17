@@ -70,6 +70,28 @@ Configure your own secure API keys in `.Renviron`. For development, you can use 
 - Use `.Renviron.example` as a template for new deployments
 - For production: generate secure, unique API keys
 
+### Deploying Changes to Production
+
+**For code changes (preferred method):**
+```r
+# Quick deployment of specific file changes
+library(analogsea)
+droplet <- droplets()[[1]]  # or specify your droplet
+
+# Upload updated files
+droplet_upload(droplet, 
+               local = "functions/tree_generation.R", 
+               remote = "/var/plumber/evolution-mapper/functions/tree_generation.R")
+
+# Restart the service
+droplet_ssh(droplet, "sudo systemctl restart plumber-evolution-mapper")
+```
+
+**For full redeployment (slower, use only when needed):**
+```r
+source("provision_server.R")
+```
+
 ### Code Quality
 ```r
 # Install and run linter

@@ -73,9 +73,12 @@ convert_to_readable_name <- function(name) {
   if (name %in% names(readable_names)) {
     return(readable_names[[name]])
   } else {
-    # Clean up scientific names - capitalize first letter, replace underscores
-    clean_name <- gsub("_", " ", name)
+    # Clean up scientific names - remove content in parentheses and brackets, capitalize first letter, replace underscores
+    clean_name <- gsub("\\s*\\([^)]*\\)", "", name)  # Remove content in parentheses
+    clean_name <- gsub("\\s*\\[[^]]*\\]", "", clean_name)  # Remove content in brackets
+    clean_name <- gsub("_", " ", clean_name)
     clean_name <- gsub("^([a-z])", "\\U\\1", clean_name, perl = TRUE)
+    clean_name <- trimws(clean_name)  # Remove any extra whitespace
     return(clean_name)
   }
 }
