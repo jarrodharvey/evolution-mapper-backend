@@ -1,5 +1,6 @@
 # Tree generation functions migrated from correct_tree_walking.R
 # Handles phylogenetic tree creation and CollapsibleTree HTML generation
+# Enhanced with ancestor age validation and display
 
 library(rotl)
 library(ape)
@@ -8,6 +9,12 @@ library(htmlwidgets)
 library(RSQLite)
 library(DBI)
 library(dplyr)
+library(datelife)
+
+# Load ancestor age functions
+source("functions/age_lookup.R")
+source("functions/gemini_validation.R")
+source("functions/age_tooltips.R")
 
 # Calculate dynamic link length based on label lengths
 calculate_dynamic_link_length <- function(network_data, base_length = 150, char_multiplier = 12) {
@@ -111,6 +118,12 @@ trace_path_to_root <- function(tip_number, edges, node_labels, tip_labels, speci
         # Handle unnamed nodes
         if (grepl("^mrcaott[0-9]+ott[0-9]+$", raw_name) || raw_name == "") {
           readable_name <- paste("Ancestor", LETTERS[parent_idx])
+          # Store mapping from readable name to MRCA ID for age lookup
+          if (grepl("^mrcaott[0-9]+ott[0-9]+$", raw_name)) {
+            mapping_var <- paste0("mrca_mapping_", readable_name)
+            assign(mapping_var, raw_name, envir = .GlobalEnv)
+            cat("STORED MAPPING:", readable_name, "->", raw_name, "\n")
+          }
         } else {
           readable_name <- convert_to_readable_name(raw_name)
         }
@@ -233,12 +246,25 @@ fallback_tnrs_resolution <- function(species_data) {
 }
 
 # Function to convert phylo object directly to collapsibleTreeNetwork format
+# Enhanced with ancestor age validation
 convert_phylo_to_network <- function(phylo_tree, species_data) {
   # Extract components from phylo object
   edges <- phylo_tree$edge
   tip_labels <- phylo_tree$tip.label  
   node_labels <- phylo_tree$node.label
   n_tips <- Ntip(phylo_tree)
+  
+  cat("=== ADDING ANCESTOR AGES TO TREE ===\n")
+  
+  # Populate age cache from DateLife for this species set
+  species_names <- species_data$scientific[!is.na(species_data$scientific)]
+  if (length(species_names) > 0) {
+    populate_success <- populate_age_cache_from_datelife(species_names)
+    if (populate_success) {
+      # Validate ages with Gemini
+      validate_and_update_age_cache()
+    }
+  }
   
   # Create node label lookup table
   node_lookup <- c()
@@ -279,16 +305,22 @@ convert_phylo_to_network <- function(phylo_tree, species_data) {
     }
   }
   
-  # Build network data frame directly from edge matrix
+  # Build network data frame directly from edge matrix with age fields
   network_data <- data.frame(
     from = character(0),
     to = character(0), 
     NodeType = character(0),
     Color = character(0),
+    Age = numeric(0),           # Age in millions of years
+    AgeSource = character(0),   # Confidence level
+    AgeValid = logical(0),      # Passed validation checks
+    ValidationNotes = character(0), # Why validation failed/succeeded
     stringsAsFactors = FALSE
   )
   
-  # Convert each edge to parent-child relationship
+  # Convert each edge to parent-child relationship with age lookup
+  parent_ages <- list()  # Track parent ages for validation
+  
   for (i in 1:nrow(edges)) {
     parent_num <- edges[i, 1]
     child_num <- edges[i, 2]
@@ -310,11 +342,38 @@ convert_phylo_to_network <- function(phylo_tree, species_data) {
       }
     }
     
+    # Get validated age for child node (only for non-species)
+    child_age_result <- list(age = NA, source = "species", valid = TRUE, notes = "Modern species")
+    
+    if (child_type != "species") {
+      # Get original node label for age lookup
+      if (child_num > n_tips && !is.null(node_labels)) {
+        original_label <- node_labels[child_num - n_tips]
+        parent_age <- parent_ages[[as.character(parent_num)]]
+        
+        child_age_result <- get_validated_node_age(
+          node_label = original_label,
+          node_num = child_num,
+          phylo_tree = phylo_tree,
+          parent_age = parent_age
+        )
+        
+        # Track this node's age for its children
+        if (!is.na(child_age_result$age)) {
+          parent_ages[[as.character(child_num)]] <- child_age_result$age
+        }
+      }
+    }
+    
     network_data <- rbind(network_data, data.frame(
       from = parent_label,
       to = child_label,
       NodeType = child_type,
       Color = child_color,
+      Age = child_age_result$age,
+      AgeSource = child_age_result$source,
+      AgeValid = child_age_result$valid,
+      ValidationNotes = child_age_result$notes,
       stringsAsFactors = FALSE
     ))
   }
@@ -327,12 +386,16 @@ convert_phylo_to_network <- function(phylo_tree, species_data) {
   if (length(root_nodes) == 1) {
     root_name <- "Common ancestor - click me!"
     
-    # Add root row with NA parent
+    # Add root row with NA parent and no age data (root is conceptual)
     root_row <- data.frame(
       from = NA,
       to = root_name, 
       NodeType = "root",
       Color = "#E74C3C",  # Red for root
+      Age = NA,
+      AgeSource = "root",
+      AgeValid = TRUE,
+      ValidationNotes = "Root node - no age applicable",
       stringsAsFactors = FALSE
     )
     
@@ -342,6 +405,22 @@ convert_phylo_to_network <- function(phylo_tree, species_data) {
     # Prepend root row
     network_data <- rbind(root_row, network_data)
   }
+  
+  # Final tree-wide validation
+  cat("=== FINAL TREE VALIDATION ===\n")
+  consistency_valid <- validate_phylogenetic_consistency(network_data)
+  
+  # Summary report
+  total_nodes <- nrow(network_data)
+  nodes_with_ages <- sum(!is.na(network_data$Age))
+  nodes_validated <- sum(network_data$AgeValid, na.rm = TRUE)
+  
+  cat(sprintf("Tree validation complete:\n"))
+  cat(sprintf("- Total nodes: %d\n", total_nodes))
+  cat(sprintf("- Nodes with ages: %d (%.1f%%)\n", nodes_with_ages, 100 * nodes_with_ages / total_nodes))
+  cat(sprintf("- Validated nodes: %d (%.1f%%)\n", nodes_validated, 100 * nodes_validated / total_nodes))
+  cat(sprintf("- Phylogenetic consistency: %s\n", ifelse(consistency_valid, "PASS", "FAIL")))
+  cat("=== TREE READY FOR DISPLAY ===\n\n")
   
   return(network_data)
 }
@@ -536,7 +615,50 @@ generate_tree_html_direct <- function(common_names) {
     # Calculate dynamic link length based on label lengths
     dynamic_link_length <- calculate_dynamic_link_length(network_data)
     
-    # Create collapsibleTree
+    # Add age display information for tooltips
+    network_data$AgeDisplay <- sapply(1:nrow(network_data), function(i) {
+      node_info <- as.list(network_data[i, ])
+      
+      # For nodes with valid age data
+      if (!is.na(node_info$Age) && node_info$AgeValid) {
+        age_text <- sprintf("%.1f Mya", node_info$Age)
+        geological_period <- get_geological_period(node_info$Age)
+        if (!is.null(geological_period)) {
+          age_text <- paste0(age_text, " (", geological_period, ")")
+        }
+        return(paste0(node_info$to, "<br>", age_text))
+      } else if (node_info$NodeType != "species" && node_info$NodeType != "root") {
+        # For ancestor nodes without age data - attempt MRCA lookup
+        mrca_id <- "unknown"
+        if (grepl("^Ancestor [A-Z]$", node_info$to)) {
+          mrca_var_name <- paste0("mrca_mapping_", node_info$to)
+          if (exists(mrca_var_name, envir = .GlobalEnv)) {
+            mrca_id <- get(mrca_var_name, envir = .GlobalEnv)
+            
+            # Attempt age lookup with the MRCA ID
+            source("functions/age_lookup.R")
+            age_result <- get_validated_node_age(mrca_id)
+            
+            if (age_result$valid && !is.na(age_result$age)) {
+              age_text <- sprintf("%.1f Mya", age_result$age)
+              geological_period <- get_geological_period(age_result$age)
+              if (!is.null(geological_period)) {
+                age_text <- paste0(age_text, " (", geological_period, ")")
+              }
+              return(paste0(node_info$to, "<br>", age_text))
+            }
+          }
+        }
+        
+        debug_info <- paste0("<br><small><em>ID processed: ", mrca_id, "</em></small>")
+        return(paste0(node_info$to, "<br>(age unavailable)", debug_info))
+      } else {
+        # Species and root nodes
+        return(node_info$to)
+      }
+    })
+    
+    # Create collapsibleTree (age information to be added via tooltips)
     tree <- collapsibleTreeNetwork(
       network_data,
       attribute = "NodeType",
@@ -546,6 +668,7 @@ generate_tree_html_direct <- function(common_names) {
       zoomable = TRUE,
       fontSize = 12,
       tooltip = TRUE,
+      tooltipHtml = "AgeDisplay",
       linkLength = dynamic_link_length,
       collapsed = TRUE,
       nodeSize = "leafCount"
@@ -558,6 +681,8 @@ generate_tree_html_direct <- function(common_names) {
     # Read HTML content
     html_content <- readChar(temp_file, file.info(temp_file)$size)
     unlink(temp_file)
+    
+    # Age information is now displayed directly in node labels
     
     return(list(
       success = TRUE,
@@ -622,11 +747,15 @@ html = NULL
     
     
     # Back to collapsibleTreeNetwork with better data handling
-    # Convert hierarchy to parent-child relationships
+    # Convert hierarchy to parent-child relationships with age fields
     network_data <- data.frame(
       from = character(0),
       to = character(0),
       NodeType = character(0),
+      Age = numeric(0),           # Age in millions of years
+      AgeSource = character(0),   # Confidence level
+      AgeValid = logical(0),      # Passed validation checks
+      ValidationNotes = character(0), # Why validation failed/succeeded
       stringsAsFactors = FALSE
     )
     
@@ -693,11 +822,28 @@ html = NULL
           child_type <- "taxonomic"
         }
         
+        # Get validated age for child node (species have no age)
+        child_age_result <- list(age = NA, source = "species", valid = TRUE, notes = "Modern species")
+        
+        if (child_type != "species") {
+          # For hierarchical data, we need to look up ages by taxonomic name
+          child_age_result <- get_validated_node_age(
+            node_label = child,
+            node_num = NULL,
+            phylo_tree = NULL,
+            parent_age = NULL  # Will be validated later in tree-wide check
+          )
+        }
+        
         # Add to network data
         network_data <- rbind(network_data, data.frame(
           from = parent,
           to = child,
           NodeType = child_type,
+          Age = child_age_result$age,
+          AgeSource = child_age_result$source,
+          AgeValid = child_age_result$valid,
+          ValidationNotes = child_age_result$notes,
           stringsAsFactors = FALSE
         ))
       }
@@ -737,6 +883,10 @@ html = NULL
       to = root_name,
       NodeType = "root",
       Color = "#E74C3C",
+      Age = NA,
+      AgeSource = "root",
+      AgeValid = TRUE,
+      ValidationNotes = "Root node - no age applicable",
       stringsAsFactors = FALSE
     )
     
@@ -746,6 +896,49 @@ html = NULL
     # Calculate dynamic link length based on label lengths
     dynamic_link_length <- calculate_dynamic_link_length(network_data)
     
+    # Add age display information for tooltips
+    network_data$AgeDisplay <- sapply(1:nrow(network_data), function(i) {
+      node_info <- as.list(network_data[i, ])
+      
+      # For nodes with valid age data
+      if (!is.na(node_info$Age) && node_info$AgeValid) {
+        age_text <- sprintf("%.1f Mya", node_info$Age)
+        geological_period <- get_geological_period(node_info$Age)
+        if (!is.null(geological_period)) {
+          age_text <- paste0(age_text, " (", geological_period, ")")
+        }
+        return(paste0(node_info$to, "<br>", age_text))
+      } else if (node_info$NodeType != "species" && node_info$NodeType != "root") {
+        # For ancestor nodes without age data - attempt MRCA lookup
+        mrca_id <- "unknown"
+        if (grepl("^Ancestor [A-Z]$", node_info$to)) {
+          mrca_var_name <- paste0("mrca_mapping_", node_info$to)
+          if (exists(mrca_var_name, envir = .GlobalEnv)) {
+            mrca_id <- get(mrca_var_name, envir = .GlobalEnv)
+            
+            # Attempt age lookup with the MRCA ID
+            source("functions/age_lookup.R")
+            age_result <- get_validated_node_age(mrca_id)
+            
+            if (age_result$valid && !is.na(age_result$age)) {
+              age_text <- sprintf("%.1f Mya", age_result$age)
+              geological_period <- get_geological_period(age_result$age)
+              if (!is.null(geological_period)) {
+                age_text <- paste0(age_text, " (", geological_period, ")")
+              }
+              return(paste0(node_info$to, "<br>", age_text))
+            }
+          }
+        }
+        
+        debug_info <- paste0("<br><small><em>ID processed: ", mrca_id, "</em></small>")
+        return(paste0(node_info$to, "<br>(age unavailable)", debug_info))
+      } else {
+        # Species and root nodes
+        return(node_info$to)
+      }
+    })
+
     tree <- collapsibleTreeNetwork(
       network_data,
       attribute = "NodeType",
@@ -755,6 +948,7 @@ html = NULL
       zoomable = TRUE,
       fontSize = 12,
       tooltip = TRUE,
+      tooltipHtml = "AgeDisplay",
       linkLength = dynamic_link_length,
       collapsed = TRUE,
       nodeSize = "leafCount"
@@ -771,6 +965,8 @@ html = NULL
     
     # Clean up temporary file
     unlink(temp_file)
+    
+    # Age information is now displayed directly in node labels
     
     return(list(
       success = TRUE,
