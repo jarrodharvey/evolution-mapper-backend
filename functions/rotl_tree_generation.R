@@ -1,0 +1,373 @@
+# ROTL Tree generation functions - topology only (no ages)
+# Handles phylogenetic tree creation using Open Tree of Life
+# This version provides tree topology only, without ancestor ages
+
+library(rotl)
+library(ape)
+library(collapsibleTree)
+library(htmlwidgets)
+library(RSQLite)
+library(DBI)
+library(dplyr)
+
+# Calculate dynamic link length based on label lengths
+calculate_dynamic_link_length <- function(network_data, base_length = 80, char_multiplier = 3) {
+  # Get all node names
+  all_names <- c(network_data$from, network_data$to)
+  
+  # Find the longest label
+  max_chars <- max(nchar(all_names), na.rm = TRUE)
+  
+  # Calculate dynamic length: base + (characters * multiplier)
+  dynamic_length <- base_length + (max_chars * char_multiplier)
+  
+  # Set reasonable bounds (minimum 120, maximum 250)
+  dynamic_length <- max(120, min(250, dynamic_length))
+  
+  return(dynamic_length)
+}
+
+# Function to get species from database
+get_species_from_db <- function(common_names) {
+  db_path <- "data/species.sqlite"
+  species_db <- dbConnect(SQLite(), db_path)
+  
+  species_data <- lapply(common_names, function(common_name) {
+    # Get all matches for this common name
+    sql_string <- paste0("SELECT * FROM species WHERE common = '", common_name, "'")
+    query_result <- dbSendQuery(species_db, sql_string)
+    species_df <- dbFetch(query_result)
+    dbClearResult(query_result)
+    
+    if (nrow(species_df) > 0) {
+      # Pick one at random if multiple matches exist
+      random_index <- sample(nrow(species_df), 1)
+      return(species_df[random_index, ])
+    } else {
+      return(data.frame(ott = NA, common = common_name, scientific = NA))
+    }
+  }) %>%
+    bind_rows()
+  
+  dbDisconnect(species_db)
+  return(species_data)
+}
+
+# Function to convert scientific names to readable ancestor labels
+convert_to_readable_name <- function(name) {
+  # Handle common scientific name patterns
+  readable_names <- list(
+    "Homo sapiens" = "Human",
+    "Canis lupus" = "Dog", 
+    "Felis catus" = "Cat",
+    "Boreoeutheria" = "Northern placental mammals",
+    "Canidae" = "Dog family",
+    "Felidae" = "Cat family",
+    "Carnivora" = "Carnivores (meat-eaters)",
+    "Mammalia" = "Mammals",
+    "Chordata" = "Vertebrates",
+    "Primates" = "Primates (apes and monkeys)",
+    "Hominidae" = "Great apes"
+  )
+  
+  # Return readable name if available, otherwise clean up scientific name
+  if (name %in% names(readable_names)) {
+    return(readable_names[[name]])
+  } else {
+    # Clean up scientific names - remove OTT IDs, content in parentheses and brackets, capitalize first letter, replace underscores
+    clean_name <- name
+    
+    # Handle Mrcaott patterns - these should never reach this function but just in case
+    if (grepl("^[Mm]rcaott\\d+ott\\d+", clean_name)) {
+      return(paste0("Internal node (", substr(clean_name, 1, 15), "...)"))
+    } 
+    
+    # Handle labels that are ONLY an OTT ID
+    if (grepl("^ott\\d+$", clean_name)) {
+      return(paste0("Taxonomic group (", clean_name, ")"))
+    } 
+    
+    # Clean up normal taxonomic names by removing OTT IDs
+    clean_name <- gsub("\\s*ott\\d+", "", clean_name)
+    clean_name <- gsub("\\s*\\([^)]*\\)", "", clean_name)  # Remove content in parentheses
+    clean_name <- gsub("\\s*\\[[^]]*\\]", "", clean_name)  # Remove content in brackets
+    clean_name <- gsub("_", " ", clean_name)
+    clean_name <- gsub("^([a-z])", "\\U\\1", clean_name, perl = TRUE)
+    clean_name <- trimws(clean_name)  # Remove any extra whitespace
+    
+    # If cleaning removed everything, return a fallback with original name for uniqueness
+    if (clean_name == "" || nchar(clean_name) == 0) {
+      return(paste0("Taxonomic group (", substr(name, 1, 10), "...)"))
+    }
+    
+    return(clean_name)
+  }
+}
+
+# Function to trace path from tip to root (simplified - no age tracking)
+trace_path_to_root <- function(tip_number, edges, node_labels, tip_labels, species_common_name) {
+  path <- c()
+  current_node <- tip_number
+  n_tips <- length(tip_labels)
+  
+  # Start with the species (tip) - use provided common name
+  path <- c(species_common_name)
+  
+  # Traverse up the tree until we reach the root
+  while (TRUE) {
+    # Find the edge where this node is the child (second column)
+    edge_index <- which(edges[, 2] == current_node)
+    
+    if (length(edge_index) == 0) {
+      # We've reached the root
+      break
+    }
+    
+    # Get the parent node
+    parent_node <- edges[edge_index, 1]
+    
+    # Convert node label
+    if (parent_node <= n_tips) {
+      # This shouldn't happen in a proper tree, but handle it
+      parent_label <- tip_labels[parent_node]
+    } else {
+      # Internal node
+      internal_index <- parent_node - n_tips
+      if (!is.null(node_labels) && length(node_labels) >= internal_index && !is.na(node_labels[internal_index])) {
+        parent_label <- convert_to_readable_name(node_labels[internal_index])
+      } else {
+        # Generate a generic ancestor label
+        ancestor_count <- sum(grepl("^Ancestor", path)) + 1
+        parent_label <- paste("Ancestor", LETTERS[ancestor_count])
+      }
+    }
+    
+    # Add to path
+    path <- c(parent_label, path)
+    
+    # Move to parent for next iteration
+    current_node <- parent_node
+  }
+  
+  return(path)
+}
+
+# Main function to generate tree HTML from phylo object (topology only)
+convert_phylo_to_network <- function(phylo_tree, species_data) {
+  # Basic tree information
+  n_tips <- length(phylo_tree$tip.label)
+  n_nodes <- phylo_tree$Nnode
+  cat(sprintf("Processing tree with %d tips and %d internal nodes\n", n_tips, n_nodes))
+  
+  # Build network data frame directly from edge matrix
+  network_data <- data.frame(
+    from = character(0),
+    to = character(0),
+    NodeType = character(0),
+    stringsAsFactors = FALSE
+  )
+  
+  # Convert each edge to parent-child relationship
+  for (i in 1:nrow(phylo_tree$edge)) {
+    parent_num <- phylo_tree$edge[i, 1]
+    child_num <- phylo_tree$edge[i, 2]
+    
+    # Determine parent label
+    if (parent_num <= n_tips) {
+      # Parent is a tip (shouldn't happen in proper trees)
+      parent_label <- species_data$common[parent_num]
+    } else {
+      # Parent is internal node
+      internal_index <- parent_num - n_tips
+      if (!is.null(phylo_tree$node.label) && length(phylo_tree$node.label) >= internal_index && !is.na(phylo_tree$node.label[internal_index]) && nchar(trimws(phylo_tree$node.label[internal_index])) > 0 && !grepl("^[Mm]rcaott\\d+ott\\d+", phylo_tree$node.label[internal_index])) {
+        parent_label <- convert_to_readable_name(phylo_tree$node.label[internal_index])
+      } else {
+        parent_label <- paste("Ancestor", LETTERS[min(internal_index, 26)])
+      }
+    }
+    
+    # Determine child label and type
+    if (child_num <= n_tips) {
+      # Child is a tip (species)
+      child_label <- species_data$common[child_num]
+      child_type <- "species"
+    } else {
+      # Child is internal node
+      internal_index <- child_num - n_tips
+      if (!is.null(phylo_tree$node.label) && length(phylo_tree$node.label) >= internal_index && !is.na(phylo_tree$node.label[internal_index]) && nchar(trimws(phylo_tree$node.label[internal_index])) > 0 && !grepl("^[Mm]rcaott\\d+ott\\d+", phylo_tree$node.label[internal_index])) {
+        child_label <- convert_to_readable_name(phylo_tree$node.label[internal_index])
+        child_type <- "taxonomic"
+      } else {
+        child_label <- paste("Ancestor", LETTERS[min(internal_index, 26)])
+        child_type <- "ancestor"
+      }
+    }
+    
+    # Add edge to network
+    network_data <- rbind(network_data, data.frame(
+      from = parent_label,
+      to = child_label,
+      NodeType = child_type,
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # Add proper root handling for collapsibleTreeNetwork
+  if (nrow(network_data) > 0) {
+    # Find the phylogenetic root from the tree structure
+    # The root is the internal node with the highest number (n_tips + n_nodes)
+    root_node_num <- n_tips + phylo_tree$Nnode
+    
+    # Find what label this root node has in our network
+    root_label <- NULL
+    for (i in 1:nrow(phylo_tree$edge)) {
+      parent_num <- phylo_tree$edge[i, 1]
+      if (parent_num == root_node_num) {
+        # This is an edge from the root
+        internal_index <- parent_num - n_tips
+        if (!is.null(phylo_tree$node.label) && length(phylo_tree$node.label) >= internal_index && !is.na(phylo_tree$node.label[internal_index]) && nchar(trimws(phylo_tree$node.label[internal_index])) > 0) {
+          root_label <- convert_to_readable_name(phylo_tree$node.label[internal_index])
+        } else {
+          root_label <- paste("Ancestor", LETTERS[internal_index])
+        }
+        break
+      }
+    }
+    
+    # Find orphaned parents (parents that are never children) from network data
+    all_parents <- unique(network_data$from)
+    all_children <- unique(network_data$to)
+    orphaned_parents <- setdiff(all_parents, all_children)
+    
+    # Connect all orphaned parents to a single root
+    root_name <- "Common ancestor - click me!"
+    
+    if (length(orphaned_parents) > 0) {
+      # For each orphaned parent, connect it to the root with correct node type
+      for (orphaned_parent in orphaned_parents) {
+        # Determine node type based on the name
+        if (grepl("^Ancestor [A-Z]$", orphaned_parent)) {
+          node_type <- "ancestor"
+        } else {
+          node_type <- "taxonomic"
+        }
+        
+        network_data <- rbind(data.frame(
+          from = root_name,
+          to = orphaned_parent,
+          NodeType = node_type,
+          stringsAsFactors = FALSE
+        ), network_data)
+      }
+    }
+    
+    # Add root row with NA parent (required by collapsibleTreeNetwork)
+    network_data <- rbind(data.frame(
+      from = NA,
+      to = root_name,
+      NodeType = "root",
+      stringsAsFactors = FALSE
+    ), network_data)
+  }
+  
+  return(network_data)
+}
+
+# Generate tree HTML from species list (topology only)
+generate_tree_html <- function(species_names) {
+  tryCatch({
+    cat("=== GENERATING TOPOLOGY-ONLY TREE ===\n")
+    
+    # Get species data from database
+    species_data <- get_species_from_db(species_names)
+    
+    # Check for missing OTT IDs
+    valid_species <- species_data[!is.na(species_data$ott), ]
+    
+    if (nrow(valid_species) < 2) {
+      missing_species <- species_data$common[is.na(species_data$ott)]
+      return(list(
+        success = FALSE,
+        error = "Insufficient species with valid OTT IDs for tree generation",
+        missing_species = missing_species,
+        note = "At least 2 species with valid OTT IDs are required"
+      ))
+    }
+    
+    # Get tree from Open Tree of Life
+    cat("Fetching tree from Open Tree of Life...\n")
+    tree <- tol_induced_subtree(ott_ids = valid_species$ott)
+    
+    if (is.null(tree)) {
+      return(list(
+        success = FALSE,
+        error = "Failed to get tree from Open Tree of Life"
+      ))
+    }
+    
+    # Convert phylo tree to network format
+    network_data <- convert_phylo_to_network(tree, valid_species)
+    
+    if (is.null(network_data) || nrow(network_data) == 0) {
+      return(list(
+        success = FALSE,
+        error = "Failed to convert tree to network format"
+      ))
+    }
+    
+    # Calculate dynamic link length
+    link_length <- calculate_dynamic_link_length(network_data)
+    
+    # Prepare data frame for collapsibleTreeNetwork (Parent, Child format)
+    tree_data <- data.frame(
+      Parent = network_data$from,
+      Child = network_data$to,
+      NodeType = network_data$NodeType,
+      stringsAsFactors = FALSE
+    )
+    
+    # Add color mapping based on node type
+    tree_data$Color <- sapply(tree_data$NodeType, function(type) {
+      switch(type,
+        "root" = "#E74C3C",        # Red for root
+        "ancestor" = "#3498DB",     # Blue for ancestors  
+        "taxonomic" = "#F39C12",    # Orange for taxonomic groups
+        "species" = "#27AE60",      # Green for species
+        "#999999"                   # Default gray
+      )
+    })
+    
+    # Create collapsibleTree with proper color mapping
+    tree_widget <- collapsibleTreeNetwork(
+      tree_data,
+      attribute = "NodeType",
+      fill = "Color", 
+      fontSize = 12,
+      linkLength = link_length,
+      nodeSize = "leafCount",
+      width = 900,
+      height = 700,
+      zoomable = TRUE
+    )
+    
+    # Convert to HTML using temporary file approach
+    temp_file <- tempfile(fileext = ".html")
+    htmlwidgets::saveWidget(tree_widget, temp_file, selfcontained = TRUE)
+    tree_html <- paste(readLines(temp_file), collapse = "\n")
+    unlink(temp_file)  # Clean up temp file
+    
+    return(list(
+      success = TRUE,
+      html = tree_html,
+      species_count = nrow(valid_species),
+      tree_type = "topology_only",
+      data_source = "Open Tree of Life"
+    ))
+    
+  }, error = function(e) {
+    return(list(
+      success = FALSE,
+      error = paste("Error generating tree:", conditionMessage(e))
+    ))
+  })
+}

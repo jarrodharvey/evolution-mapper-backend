@@ -29,7 +29,13 @@ function(req, res) {
 }
 
 # Source tree generation functions
-source("functions/tree_generation.R")
+source("functions/rotl_tree_generation.R")
+source("functions/datelife_tree_generation.R")
+
+# Required libraries
+library(DBI)
+library(RSQLite)
+library(jsonlite)
 
 # Simple in-memory rate limiting - tracks requests per IP
 rate_limit_storage <- new.env()
@@ -186,7 +192,28 @@ function(search = NULL, limit = 50) {
       limit <- 100  # Prevent excessive results
     }
     
-    species_data <- search_species(search, limit)
+    # Query database directly
+    db_path <- "data/species.sqlite"
+    species_db <- dbConnect(SQLite(), db_path)
+    
+    if (is.null(search) || search == "") {
+      query <- paste0(
+        "SELECT common, scientific, ott FROM species ",
+        "WHERE ott IS NOT NULL AND ott != '' AND common IS NOT NULL ",
+        "ORDER BY common LIMIT ", limit
+      )
+    } else {
+      query <- paste0(
+        "SELECT common, scientific, ott FROM species ",
+        "WHERE ott IS NOT NULL AND ott != '' AND common IS NOT NULL ",
+        "AND (common LIKE '%", gsub("'", "''", search), "%' OR scientific LIKE '%", gsub("'", "''", search), "%') ",
+        "ORDER BY common LIMIT ", limit
+      )
+    }
+    
+    species_data <- dbGetQuery(species_db, query)
+    dbDisconnect(species_db)
+    
     list(
       success = TRUE,
       count = nrow(species_data),
@@ -253,7 +280,21 @@ function(count = NULL) {
   }
   
   tryCatch({
-    random_species <- get_random_species(count)
+    # Get random species from database directly
+    db_path <- "data/species.sqlite"
+    species_db <- dbConnect(SQLite(), db_path)
+    
+    query <- paste0(
+      "SELECT common FROM species ",
+      "WHERE ott IS NOT NULL AND ott != '' AND common IS NOT NULL ",
+      "ORDER BY RANDOM() LIMIT ", count
+    )
+    
+    random_species_data <- dbGetQuery(species_db, query)
+    dbDisconnect(species_db)
+    
+    random_species <- random_species_data$common
+    
     return(list(
       success = TRUE,
       count = length(random_species),
@@ -284,18 +325,171 @@ function(count = NULL) {
   }
   
   tryCatch({
-    random_species <- get_random_species(count)
+    # Get random species from database directly
+    db_path <- "data/species.sqlite"
+    species_db <- dbConnect(SQLite(), db_path)
+    
+    query <- paste0(
+      "SELECT common, scientific, ott FROM species ",
+      "WHERE ott IS NOT NULL AND ott != '' AND common IS NOT NULL ",
+      "ORDER BY RANDOM() LIMIT ", count
+    )
+    
+    random_species_data <- dbGetQuery(species_db, query)
+    dbDisconnect(species_db)
+    
+    if (nrow(random_species_data) < 2) {
+      return(list(
+        success = FALSE,
+        error = "Could not find enough valid species in database"
+      ))
+    }
+    
+    random_species <- random_species_data$common
     result <- generate_tree_html(random_species)
     
-    if (result$success) {
-      result$selected_species <- random_species
-    }
+    # Always include selected species for debugging
+    result$selected_species <- random_species
     
     return(result)
   }, error = function(e) {
     return(list(
       success = FALSE,
-      error = paste("Error generating random tree:", conditionMessage(e))
+      error = paste("Error generating random tree:", conditionMessage(e)),
+      selected_species = if(exists("random_species")) random_species else "unknown"
+    ))
+  })
+}
+
+#* Generate dated phylogenetic tree using DateLife chronograms
+#* @param species A JSON array of species scientific names
+#* @param allow_partial_response Boolean to allow partial coverage trees (default false)
+#* @post /api/dated-tree
+function(req, species = NULL, allow_partial_response = FALSE) {
+  if (is.null(species)) {
+    return(list(
+      success = FALSE,
+      error = "Missing required parameter 'species'",
+      note = "This endpoint requires scientific names, not common names"
+    ))
+  }
+  
+  # Handle both JSON array and comma-separated string formats
+  if (is.character(species)) {
+    if (startsWith(species, "[") && endsWith(species, "]")) {
+      species_list <- jsonlite::fromJSON(species)
+    } else {
+      species_list <- trimws(strsplit(species, ",")[[1]])
+    }
+  } else {
+    species_list <- species
+  }
+  
+  if (length(species_list) < 2) {
+    return(list(
+      success = FALSE,
+      error = "At least 2 species required for tree generation"
+    ))
+  }
+  
+  # Parse allow_partial_response parameter
+  allow_partial <- FALSE
+  if (!is.null(allow_partial_response)) {
+    if (is.logical(allow_partial_response)) {
+      allow_partial <- allow_partial_response
+    } else if (is.character(allow_partial_response)) {
+      allow_partial <- tolower(allow_partial_response) %in% c("true", "1", "yes")
+    }
+  }
+  
+  tryCatch({
+    # Load DateLife
+    library(datelife)
+    library(ape)
+    
+    # Try DateLife with the input species
+    cat("Attempting DateLife with species:", paste(species_list, collapse = ", "), "\n")
+    
+    datelife_result <- get_datelife_result(input = species_list)
+    
+    if (length(datelife_result) == 0) {
+      return(list(
+        success = FALSE,
+        coverage = "none",
+        error = "No chronogram data available for any of the input species",
+        input_species = species_list,
+        note = "Try the regular /api/tree endpoint for topology-only trees"
+      ))
+    }
+    
+    # Check which species are covered
+    first_matrix <- datelife_result[[1]]
+    covered_species <- rownames(first_matrix)
+    missing_species <- setdiff(species_list, gsub("_", " ", covered_species))
+    
+    if (length(missing_species) > 0) {
+      if (!allow_partial) {
+        # Return error response for partial coverage
+        return(list(
+          success = FALSE,
+          coverage = "partial",
+          error = "Some species not found in chronogram database",
+          input_species = species_list,
+          covered_species = gsub("_", " ", covered_species),
+          missing_species = missing_species,
+          note = "DateLife can only generate trees for species with published chronogram data"
+        ))
+      } else {
+        # Generate tree with available species when allow_partial is true
+        cat("Partial coverage allowed! Generating tree with", length(covered_species), "covered species...\n")
+      }
+    }
+    
+    # All species are covered - generate the dated tree
+    cat("All species covered! Generating dated tree...\n")
+    
+    # Create median consensus matrix
+    median_matrix <- datelife_result_median_matrix(datelife_result)
+    
+    # Convert to phylo object
+    phylo_tree <- summary_matrix_to_phylo(median_matrix)
+    
+    # Get node ages
+    node_depths <- node.depth.edgelength(phylo_tree)
+    root_age <- max(node_depths)
+    
+    # Convert to CollapsibleTree-compatible format with ages
+    result <- generate_dated_tree_html(phylo_tree, median_matrix, species_list)
+    
+    if (result$success) {
+      result$datelife_info <- list(
+        chronograms_used = length(datelife_result),
+        root_age_mya = round(root_age, 1),
+        covered_species = gsub("_", " ", covered_species),
+        data_source = "DateLife chronogram database"
+      )
+      
+      # Add partial coverage information if applicable
+      if (length(missing_species) > 0) {
+        result$coverage <- "partial"
+        result$missing_species <- missing_species
+        result$input_species <- species_list
+        result$datelife_info$coverage_note <- paste0(
+          "Partial coverage: ", length(covered_species), " of ", 
+          length(species_list), " species included"
+        )
+      } else {
+        result$coverage <- "complete"
+      }
+    }
+    
+    return(result)
+    
+  }, error = function(e) {
+    return(list(
+      success = FALSE,
+      error = paste("DateLife processing error:", conditionMessage(e)),
+      input_species = species_list
     ))
   })
 }
