@@ -1,0 +1,284 @@
+# DateLife Tree Generation Functions
+# Functions for converting DateLife chronograms to CollapsibleTree HTML
+
+library(datelife)
+library(ape)
+library(collapsibleTree)
+library(RSQLite)
+library(DBI)
+library(dplyr)
+library(colorspace)
+
+#' Function to get common names from scientific names using database
+#' @param scientific_names Vector of scientific names
+#' @return Named vector with scientific names as keys and common names as values
+get_common_names_from_scientific <- function(scientific_names) {
+  db_path <- "data/species.sqlite"
+  species_db <- dbConnect(SQLite(), db_path)
+  
+  common_names <- sapply(scientific_names, function(sci_name) {
+    # Clean scientific name - remove underscores and extra whitespace
+    clean_sci <- gsub("_", " ", sci_name)
+    clean_sci <- trimws(clean_sci)
+    
+    # Query database for common name
+    query <- sprintf("SELECT common FROM species WHERE scientific = '%s' LIMIT 1", clean_sci)
+    result <- dbGetQuery(species_db, query)
+    
+    if (nrow(result) > 0 && !is.na(result$common[1])) {
+      return(result$common[1])
+    } else {
+      # If no common name found, return cleaned scientific name
+      return(clean_sci)
+    }
+  })
+  
+  dbDisconnect(species_db)
+  names(common_names) <- scientific_names
+  return(common_names)
+}
+
+#' Generate CollapsibleTree HTML from DateLife phylo object
+#' @param phylo_tree A phylo object from DateLife
+#' @param distance_matrix The distance matrix from DateLife
+#' @param original_species The original species names requested
+#' @return List with success status and HTML or error message
+generate_dated_tree_html <- function(phylo_tree, distance_matrix, original_species) {
+  tryCatch({
+    
+    # Convert phylo to network data structure preserving actual tree topology
+    network_data <- convert_phylo_to_network_with_ages(phylo_tree, distance_matrix)
+    
+    if (is.null(network_data) || nrow(network_data) == 0) {
+      return(list(
+        success = FALSE,
+        error = "Failed to convert phylo tree to network format"
+      ))
+    }
+    
+    # Create CollapsibleTree directly from network data
+    tree_html <- create_collapsible_tree_from_network(network_data)
+    
+    return(list(
+      success = TRUE,
+      html = tree_html,
+      species_count = length(original_species),
+      tree_type = "dated_chronogram",
+      data_source = "DateLife"
+    ))
+    
+  }, error = function(e) {
+    return(list(
+      success = FALSE,
+      error = paste("Error generating dated tree HTML:", conditionMessage(e))
+    ))
+  })
+}
+
+#' Convert phylo object to network format preserving actual tree structure
+#' @param phylo_tree A phylo object from DateLife
+#' @param distance_matrix Distance matrix with ages
+#' @return Data frame with parent-child network structure and ages
+convert_phylo_to_network_with_ages <- function(phylo_tree, distance_matrix) {
+  
+  # Get common names for species from database
+  species_common_names <- get_common_names_from_scientific(phylo_tree$tip.label)
+  
+  # Get node ages from the phylo tree
+  node_depths <- node.depth.edgelength(phylo_tree)
+  root_age <- max(node_depths)
+  node_ages <- root_age - node_depths
+  
+  n_tips <- length(phylo_tree$tip.label)
+  
+  # Create network data frame directly from phylo edges
+  network_data <- data.frame(
+    Parent = character(0),
+    Child = character(0),
+    Age = numeric(0),
+    NodeType = character(0),
+    stringsAsFactors = FALSE
+  )
+  
+  # Create consistent node label mapping
+  node_labels_map <- list()
+  ancestor_counter <- 1
+  
+  # Function to get consistent node label
+  get_node_label <- function(node_num, age_val) {
+    if (node_num <= n_tips) {
+      # Species node - use common name
+      return(species_common_names[phylo_tree$tip.label[node_num]])
+    } else {
+      # Internal node
+      if (!exists(as.character(node_num), node_labels_map)) {
+        # Create new ancestor label
+        if (!is.null(phylo_tree$node.label)) {
+          internal_index <- node_num - n_tips
+          if (length(phylo_tree$node.label) >= internal_index && !is.na(phylo_tree$node.label[internal_index])) {
+            node_labels_map[[as.character(node_num)]] <<- paste0("Ancestor ", LETTERS[ancestor_counter], " (", round(age_val, 1), " Mya)")
+          } else {
+            node_labels_map[[as.character(node_num)]] <<- paste0("Ancestor ", LETTERS[ancestor_counter], " (", round(age_val, 1), " Mya)")
+          }
+        } else {
+          node_labels_map[[as.character(node_num)]] <<- paste0("Ancestor ", LETTERS[ancestor_counter], " (", round(age_val, 1), " Mya)")
+        }
+        ancestor_counter <<- ancestor_counter + 1
+      }
+      return(node_labels_map[[as.character(node_num)]])
+    }
+  }
+  
+  # Function to get node type
+  get_node_type <- function(node_num) {
+    if (node_num <= n_tips) {
+      return("species")
+    } else {
+      internal_index <- node_num - n_tips
+      if (!is.null(phylo_tree$node.label) && length(phylo_tree$node.label) >= internal_index && !is.na(phylo_tree$node.label[internal_index])) {
+        node_label <- phylo_tree$node.label[internal_index]
+        # Check if it's a generic node label (like "n1", "n2") vs a meaningful taxonomic name
+        if (grepl("^n\\d+$", node_label)) {
+          return("ancestor")  # Generic node labels should be treated as ancestors
+        } else {
+          return("taxonomic") # Meaningful taxonomic names
+        }
+      } else {
+        return("ancestor")
+      }
+    }
+  }
+  
+  # Process each edge in the phylo tree
+  for (i in 1:nrow(phylo_tree$edge)) {
+    parent_num <- phylo_tree$edge[i, 1]
+    child_num <- phylo_tree$edge[i, 2]
+    
+    # Get consistent parent and child labels using mapping functions
+    parent_age_val <- if (parent_num <= n_tips) 0 else node_ages[parent_num]
+    child_age_val <- if (child_num <= n_tips) 0 else node_ages[child_num]
+    
+    parent_label <- get_node_label(parent_num, parent_age_val)
+    child_label <- get_node_label(child_num, child_age_val)
+    
+    parent_type <- get_node_type(parent_num)
+    child_type <- get_node_type(child_num)
+    
+    # Add edge to network
+    network_data <- rbind(network_data, data.frame(
+      Parent = parent_label,
+      Child = child_label,
+      Age = child_age_val,
+      NodeType = child_type,
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # Add root node (parent = NA)
+  # Find the root node (the parent that never appears as a child)
+  all_parents <- unique(network_data$Parent)
+  all_children <- unique(network_data$Child)
+  root_nodes <- setdiff(all_parents, all_children)
+  
+  if (length(root_nodes) > 0) {
+    root_label <- "Common ancestor - click me!"
+    network_data <- rbind(data.frame(
+      Parent = NA,
+      Child = root_label,
+      Age = root_age,
+      NodeType = "root",
+      stringsAsFactors = FALSE
+    ), data.frame(
+      Parent = root_label,
+      Child = root_nodes[1],
+      Age = root_age,
+      NodeType = "ancestor",
+      stringsAsFactors = FALSE
+    ), network_data)
+  }
+  
+  return(network_data)
+}
+
+#' Create CollapsibleTree HTML directly from network data with age-based colors
+#' @param network_data Data frame with Parent, Child, Age, NodeType columns
+#' @return HTML string for CollapsibleTree
+create_collapsible_tree_from_network <- function(network_data) {
+  
+  # Create age-based color mapping
+  network_data$Color <- sapply(1:nrow(network_data), function(i) {
+    node_type <- network_data$NodeType[i]
+    node_age <- network_data$Age[i]
+    
+    switch(node_type,
+      "root" = "#E74C3C",        # Red for root (same as rotl)
+      "species" = "#27AE60",     # Green for species (same as rotl)
+      "taxonomic" = {
+        # Age-based gradient for taxonomic nodes (orange to dark orange)
+        if (is.numeric(node_age) && node_age > 0) {
+          # Get all non-zero ages for scaling
+          all_ages <- network_data$Age[network_data$NodeType %in% c("taxonomic", "ancestor") & network_data$Age > 0]
+          if (length(all_ages) > 1) {
+            min_age <- min(all_ages, na.rm = TRUE)
+            max_age <- max(all_ages, na.rm = TRUE)
+            # Scale age to 0-1 range
+            age_scale <- (node_age - min_age) / (max_age - min_age)
+            # Create gradient from light orange to dark orange
+            rgb(1.0 - (age_scale * 0.3), 0.6 - (age_scale * 0.4), 0.07 - (age_scale * 0.05))
+          } else {
+            "#F39C12"  # Default orange
+          }
+        } else {
+          "#F39C12"  # Default orange for zero/invalid ages
+        }
+      },
+      "ancestor" = {
+        # Age-based gradient for ancestor nodes (blue to dark blue)
+        if (is.numeric(node_age) && node_age > 0) {
+          # Get all non-zero ages for scaling
+          all_ages <- network_data$Age[network_data$NodeType %in% c("taxonomic", "ancestor") & network_data$Age > 0]
+          if (length(all_ages) > 1) {
+            min_age <- min(all_ages, na.rm = TRUE)
+            max_age <- max(all_ages, na.rm = TRUE)
+            # Scale age to 0-1 range
+            age_scale <- (node_age - min_age) / (max_age - min_age)
+            # Create gradient from light blue to dark blue
+            rgb(0.2 - (age_scale * 0.1), 0.6 - (age_scale * 0.3), 0.9 - (age_scale * 0.3))
+          } else {
+            "#3498DB"  # Default blue
+          }
+        } else {
+          "#3498DB"  # Default blue for zero/invalid ages
+        }
+      },
+      "#999999"  # Default gray
+    )
+  })
+  
+  # Prepare data for collapsibleTreeNetwork (needs specific column names)
+  tree_network_data <- data.frame(
+    Parent = network_data$Parent,
+    Child = network_data$Child,
+    Color = network_data$Color,
+    stringsAsFactors = FALSE
+  )
+  
+  # Create the tree with color mapping
+  tree <- collapsibleTreeNetwork(
+    tree_network_data,
+    fill = "Color",
+    fontSize = 12,
+    nodeSize = "leafCount",
+    width = 800,
+    height = 600,
+    zoomable = TRUE
+  )
+  
+  # Convert to HTML using temporary file approach
+  temp_file <- tempfile(fileext = ".html")
+  htmlwidgets::saveWidget(tree, temp_file, selfcontained = TRUE)
+  tree_html <- paste(readLines(temp_file), collapse = "\n")
+  unlink(temp_file)  # Clean up temp file
+  
+  return(tree_html)
+}
