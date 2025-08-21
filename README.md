@@ -5,12 +5,13 @@ A phylogenetic tree generation API built with R Plumber, providing interactive C
 ## Features
 
 - **Species Database**: 90,276+ unique species with Open Tree of Life IDs
-- **Interactive Trees**: Color-coded CollapsibleTree HTML visualizations
+- **Dual Tree Types**: Topology-only trees (fast, any species) and dated trees (chronogram ages, limited coverage)
+- **Interactive Trees**: Color-coded CollapsibleTree HTML visualizations with age tooltips
 - **REST API**: Clean endpoints for integration with any frontend
 - **API Key Authentication**: Secure access control for all endpoints
 - **Rate Limiting**: 60 requests per minute per IP address
 - **Input Validation**: SQL injection protection and parameter sanitization
-- **Self-contained**: No external dependencies beyond R packages
+- **Graceful Fallback**: Partial coverage detection for seamless user experience
 
 ## API Endpoints
 
@@ -31,14 +32,31 @@ Search species by name (case-insensitive). Optional parameters:
 - `search`: Search term for species names
 - `limit`: Max results (default 50, max 100)
 
-### Generate Phylogenetic Tree
+### Generate Phylogenetic Tree (Topology Only)
 ```
 POST /api/tree
 Headers: X-API-Key: your-api-key
 Content-Type: application/x-www-form-urlencoded
 Body: species=Human,Dog,Cat
 ```
-Returns interactive CollapsibleTree HTML.
+Returns interactive CollapsibleTree HTML with topology only (no ages). Uses common names.
+
+### Generate Dated Phylogenetic Tree (NEW)
+```
+POST /api/dated-tree
+Headers: X-API-Key: your-api-key
+Content-Type: application/x-www-form-urlencoded
+Body: species=Homo sapiens,Canis lupus
+```
+Returns age-calibrated tree using DateLife chronogram database. **Requires scientific names**.
+
+**Coverage Limitations**: DateLife has extremely limited species coverage. Most species return no chronogram data. Frontend should attempt this endpoint first, then fall back to `/api/tree` if partial/no coverage.
+
+**Partial Response Mode**:
+```
+Body: species=Homo sapiens,Canis lupus,Felis catus&allow_partial_response=true
+```
+Allows tree generation with subset of species when some lack chronogram data.
 
 ### Random Tree (Testing)
 ```
@@ -58,13 +76,15 @@ Returns color coding information for tree visualization nodes.
 
 ```
 backend/
-├── plumber.R              # Main API server
+├── plumber.R                        # Main API server
 ├── functions/
-│   └── tree_generation.R  # Core tree generation logic
+│   ├── rotl_tree_generation.R       # Topology-only trees (Open Tree of Life)
+│   ├── datelife_tree_generation.R   # Dated trees (DateLife chronograms)
+│   └── tree_generation.R            # Legacy tree generation logic
 ├── data/
-│   └── species.sqlite     # Species database (90k+ records)
-├── provision_server.R     # Automated DigitalOcean deployment
-├── .Renviron.example      # Environment configuration template
+│   └── species.sqlite               # Species database (90k+ records)
+├── provision_server.R               # Automated DigitalOcean deployment
+├── .Renviron.example                # Environment configuration template
 └── README.md
 ```
 
@@ -74,6 +94,7 @@ Required R packages:
 - `plumber` - API framework
 - `rlang` - Required for %||% operator
 - `rotl` - Open Tree of Life integration
+- `datelife` - **NEW**: Chronogram database access for dated trees
 - `ape` - Phylogenetic tree handling
 - `collapsibleTree` - Interactive tree visualization
 - `htmlwidgets` - Widget framework
@@ -101,7 +122,7 @@ EVOLUTION_API_KEYS=your-key-1,your-key-2,your-key-3
 ```r
 # Install dependencies
 install.packages(c("plumber", "rlang", "rotl", "ape", "collapsibleTree", 
-                   "htmlwidgets", "RSQLite", "DBI", "dplyr"))
+                   "htmlwidgets", "RSQLite", "DBI", "dplyr", "datelife"))
 
 # Run API server
 library(plumber)
@@ -120,8 +141,14 @@ curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/species?search=wh
 # Legend information
 curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/legend"
 
-# Generate tree
+# Generate topology tree (common names)
 curl -X POST -H "X-API-Key: demo-key-12345" -d "species=Human,Dog,Cat" http://localhost:8000/api/tree
+
+# Generate dated tree (scientific names, limited coverage)
+curl -X POST -H "X-API-Key: demo-key-12345" -d "species=Homo sapiens,Canis lupus" http://localhost:8000/api/dated-tree
+
+# Dated tree with partial response allowed
+curl -X POST -H "X-API-Key: demo-key-12345" -d "species=Homo sapiens,Canis lupus,Felis catus&allow_partial_response=true" http://localhost:8000/api/dated-tree
 
 # Random tree
 curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/random-tree?count=3"

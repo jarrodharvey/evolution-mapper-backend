@@ -15,7 +15,7 @@ pr("plumber.R") %>% pr_run(port = 8000)
 **R Packages:**
 ```r
 install.packages(c("plumber", "rlang", "rotl", "ape", "collapsibleTree", 
-                   "htmlwidgets", "RSQLite", "DBI", "dplyr"))
+                   "htmlwidgets", "RSQLite", "DBI", "dplyr", "datelife"))
 ```
 
 **System Dependencies (for production):**
@@ -36,11 +36,14 @@ curl http://localhost:8000/api/health
 # Search species with API key in header
 curl -H "X-API-Key: YOUR-API-KEY" "http://localhost:8000/api/species?search=whale&limit=7"
 
-# Search species with API key as query parameter
-curl "http://localhost:8000/api/species?api_key=YOUR-API-KEY&search=human&limit=3"
-
-# Generate tree
+# Generate topology-only tree (no ages, uses common names)
 curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "species=Human,Dog,Cat" http://localhost:8000/api/tree
+
+# Generate dated tree with chronogram ages (requires scientific names, limited coverage)
+curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "species=Homo sapiens,Canis lupus" http://localhost:8000/api/dated-tree
+
+# Generate partial tree when some species missing (allow_partial_response=true)
+curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "species=Homo sapiens,Canis lupus,Felis catus&allow_partial_response=true" http://localhost:8000/api/dated-tree
 
 # Random tree
 curl -H "X-API-Key: YOUR-API-KEY" "http://localhost:8000/api/random-tree?count=3"
@@ -104,16 +107,55 @@ lint("functions/tree_generation.R")
 ## Architecture Overview
 
 ### Core Components
-- **plumber.R**: Main API server with REST endpoints (`/api/health`, `/api/legend`, `/api/species`, `/api/tree`, `/api/random-tree`)
-- **functions/tree_generation.R**: Core phylogenetic tree logic and HTML generation
+- **plumber.R**: Main API server with REST endpoints (`/api/health`, `/api/legend`, `/api/species`, `/api/tree`, `/api/dated-tree`, `/api/random-tree`)
+- **functions/rotl_tree_generation.R**: Core phylogenetic tree logic using Open Tree of Life (topology only)
+- **functions/datelife_tree_generation.R**: Dated tree generation using DateLife chronograms with ancestor ages
 - **data/species.sqlite**: Species database (90,276+ records with OTT IDs, common names, scientific names)
+
+### API Features Overview
+- **Topology Trees**: Fast generation using common names, works for any species combination
+- **Dated Trees**: Age-calibrated trees using scientific names, limited to species with chronogram data
+- **Fallback Strategy**: Frontend can attempt dated trees first, fall back to topology trees
+- **Interactive Visualization**: Color-coded CollapsibleTree with age tooltips and geological periods
 
 ### API Endpoints
 - **GET /api/species?search=term&limit=N**: Search species by name (case-insensitive, default limit 50, max 100)
-- **POST /api/tree**: Generate phylogenetic tree from species list
-- **GET /api/random-tree?count=N**: Generate random tree for testing
+- **POST /api/tree**: Generate topology-only phylogenetic tree from species list (common names)
+- **POST /api/dated-tree**: Generate dated phylogenetic tree with chronogram ages (scientific names required, limited coverage)
+- **GET /api/random-tree?count=N**: Generate random tree for testing (topology only)
 - **GET /api/legend**: Get legend information for tree visualization colors and node types
 - **GET /api/health**: Health check endpoint
+
+### New Dated Tree API (/api/dated-tree)
+**MAJOR FEATURE**: Added in current session - provides age-calibrated phylogenetic trees using DateLife chronogram database.
+
+**Usage Pattern:**
+```bash
+# Generate dated tree with chronogram ages (requires scientific names)
+curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "species=Homo sapiens,Canis lupus" http://localhost:8000/api/dated-tree
+
+# Allow partial trees when some species missing from chronogram data
+curl -X POST -H "X-API-Key: YOUR-API-Key" -d "species=Homo sapiens,Canis lupus,Felis catus&allow_partial_response=true" http://localhost:8000/api/dated-tree
+```
+
+**Key Features:**
+- Uses DateLife R package to query chronogram database
+- Requires scientific names (not common names)
+- Returns ancestor ages in millions of years (Mya)
+- Includes geological period information in tooltips
+- Handles partial coverage gracefully with detailed error responses
+- Frontend can detect partial coverage and fall back to topology trees
+
+**Response Types:**
+- **Complete Coverage**: Full dated tree with all species
+- **Partial Coverage**: Error response with covered/missing species lists
+- **No Coverage**: Error response suggesting fallback to /api/tree
+
+**Coverage Limitations:**
+- DateLife has extremely limited species coverage
+- Most individual species return 0 chronograms
+- Coverage mainly limited to specific taxonomic groups with published molecular clock studies
+- Recommended to always implement fallback to topology-only trees
 
 ### Key Functions
 - `convert_rotl_to_hierarchy()`: Converts phylogenetic tree from Open Tree of Life to hierarchical structure
@@ -123,12 +165,22 @@ lint("functions/tree_generation.R")
 - `trace_path_to_root()`: Walks tree structure from species to root ancestor
 
 ### Data Flow
+
+**Topology-Only Trees (/api/tree):**
 1. API receives species list (common names)
 2. Database lookup to get OTT IDs and scientific names
 3. rotl library fetches phylogenetic tree from Open Tree of Life  
 4. Tree converted to hierarchical structure with readable ancestor names
 5. CollapsibleTree generates interactive HTML visualization
 6. Color-coded nodes: Red (root), Blue (unnamed ancestors), Orange (taxonomic groups), Green (species)
+
+**Dated Trees (/api/dated-tree):**
+1. API receives species list (scientific names required)
+2. DateLife searches chronogram database for published age data
+3. If partial coverage: returns JSON with missing species list for frontend handling
+4. If full coverage: generates median consensus matrix and phylo tree with ages
+5. CollapsibleTree generates interactive HTML with age information in tooltips
+6. Frontend falls back to /api/tree if DateLife coverage insufficient
 
 ### Database Schema
 ```sql
@@ -156,10 +208,37 @@ All endpoints return JSON with `success` boolean and either `error` message or r
 - **Orange (#F39C12)**: Named taxonomic groups (families, orders, etc.)
 - **Green (#27AE60)**: Species (leaf nodes)
 
+### DateLife Coverage Limitations
+**IMPORTANT**: DateLife has extremely limited coverage in the current chronogram database:
+- Most individual species return 0 chronograms when queried alone
+- Coverage appears to be limited to specific taxonomic groups with published molecular clock studies
+- Even common model organisms (Human, Dog, Cat, Mouse) often lack individual coverage
+- Some species pairs may have data when queried together due to shared studies
+
+**Recommended Usage Pattern:**
+1. Frontend attempts `/api/dated-tree` with scientific names
+2. If response includes `missing_species`, display informative message to user
+3. Frontend falls back to `/api/tree` for topology-only visualization
+4. User gets clear feedback about why age data is unavailable
+
+**Testing DateLife Coverage:**
+```r
+library(datelife)
+# Test if species have chronogram data
+result <- get_datelife_result(input = c("Homo sapiens", "Canis lupus"))
+cat("Chronograms found:", length(result))
+```
+
 ### Testing Infrastructure
 No formal test suite exists. Use curl commands above for manual endpoint testing. For function-level testing:
 ```r
-source("functions/tree_generation.R")
+# Test topology-only trees
+source("functions/rotl_tree_generation.R")
 test_species <- c("Human", "Dog", "Cat")
 result <- generate_tree_html(test_species)
+
+# Test dated trees (limited coverage)
+source("functions/datelife_tree_generation.R")
+test_species_sci <- c("Homo sapiens", "Canis lupus")
+datelife_result <- get_datelife_result(input = test_species_sci)
 ```
