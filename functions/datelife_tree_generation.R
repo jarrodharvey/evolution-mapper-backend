@@ -263,14 +263,14 @@ create_collapsible_tree_from_network <- function(network_data) {
     stringsAsFactors = FALSE
   )
   
-  # Create the tree with color mapping
+  # Create the tree with color mapping (extra large dimensions to eliminate white space)
   tree <- collapsibleTreeNetwork(
     tree_network_data,
     fill = "Color",
     fontSize = 12,
     nodeSize = "leafCount",
-    width = 800,
-    height = 600,
+    width = 1000,
+    height = 800,
     zoomable = TRUE
   )
   
@@ -279,6 +279,10 @@ create_collapsible_tree_from_network <- function(network_data) {
   htmlwidgets::saveWidget(tree, temp_file, selfcontained = TRUE)
   tree_html <- paste(readLines(temp_file), collapse = "\n")
   unlink(temp_file)  # Clean up temp file
+  
+  # Remove white bar by adding comprehensive CSS to override all spacing
+  custom_css <- "<style>body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; } html { margin: 0 !important; padding: 0 !important; } #htmlwidget_container { margin: 0 !important; padding: 0 !important; }</style>"
+  tree_html <- gsub("</head>", paste0(custom_css, "</head>"), tree_html)
   
   return(tree_html)
 }

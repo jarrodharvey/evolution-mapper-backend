@@ -401,8 +401,8 @@ generate_tree_html <- function(species_names) {
       fontSize = 12,
       linkLength = link_length,
       nodeSize = "leafCount",
-      width = 900,
-      height = 700,
+      width = 1000,
+      height = 800,
       zoomable = TRUE
     )
     
@@ -411,6 +411,10 @@ generate_tree_html <- function(species_names) {
     htmlwidgets::saveWidget(tree_widget, temp_file, selfcontained = TRUE)
     tree_html <- paste(readLines(temp_file), collapse = "\n")
     unlink(temp_file)  # Clean up temp file
+    
+    # Remove white bar by adding comprehensive CSS to override all spacing
+    custom_css <- "<style>body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; } html { margin: 0 !important; padding: 0 !important; } #htmlwidget_container { margin: 0 !important; padding: 0 !important; }</style>"
+    tree_html <- gsub("</head>", paste0(custom_css, "</head>"), tree_html)
     
     return(list(
       success = TRUE,
@@ -503,8 +507,8 @@ generate_tree_html_paired <- function(common_names, scientific_names) {
       fontSize = 12,
       linkLength = link_length,
       nodeSize = "leafCount",
-      width = 900,
-      height = 700,
+      width = 1000,
+      height = 800,
       zoomable = TRUE
     )
     
@@ -513,6 +517,10 @@ generate_tree_html_paired <- function(common_names, scientific_names) {
     htmlwidgets::saveWidget(tree_widget, temp_file, selfcontained = TRUE)
     tree_html <- paste(readLines(temp_file), collapse = "\n")
     unlink(temp_file)  # Clean up temp file
+    
+    # Remove white bar by adding comprehensive CSS to override all spacing
+    custom_css <- "<style>body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; } html { margin: 0 !important; padding: 0 !important; } #htmlwidget_container { margin: 0 !important; padding: 0 !important; }</style>"
+    tree_html <- gsub("</head>", paste0(custom_css, "</head>"), tree_html)
     
     return(list(
       success = TRUE,
