@@ -282,3 +282,201 @@ create_collapsible_tree_from_network <- function(network_data) {
   
   return(tree_html)
 }
+
+#' Generate CollapsibleTree HTML from DateLife phylo object with paired names
+#' @param phylo_tree A phylo object from DateLife
+#' @param distance_matrix The distance matrix from DateLife
+#' @param common_names The original common names requested by user
+#' @param scientific_names The original scientific names requested by user
+#' @return List with success status and HTML or error message
+generate_dated_tree_html_paired <- function(phylo_tree, distance_matrix, common_names, scientific_names) {
+  tryCatch({
+    
+    # Convert phylo to network data structure preserving user-provided common names
+    network_data <- convert_phylo_to_network_with_ages_paired(phylo_tree, distance_matrix, common_names, scientific_names)
+    
+    if (is.null(network_data) || nrow(network_data) == 0) {
+      return(list(
+        success = FALSE,
+        error = "Failed to convert phylo tree to network format"
+      ))
+    }
+    
+    # Create CollapsibleTree directly from network data (same approach as DateLife)
+    tree_html <- create_collapsible_tree_from_network(network_data)
+    
+    return(list(
+      success = TRUE,
+      html = tree_html,
+      species_count = length(common_names),
+      tree_type = "dated_chronogram",
+      data_source = "DateLife",
+      input_common_names = common_names,
+      input_scientific_names = scientific_names
+    ))
+    
+  }, error = function(e) {
+    return(list(
+      success = FALSE,
+      error = paste("Error generating paired dated tree HTML:", conditionMessage(e))
+    ))
+  })
+}
+
+#' Convert phylo object to network format preserving user-provided common names
+#' @param phylo_tree A phylo object from DateLife
+#' @param distance_matrix Distance matrix with ages
+#' @param common_names User-provided common names
+#' @param scientific_names User-provided scientific names
+#' @return Data frame with parent-child network structure and ages
+convert_phylo_to_network_with_ages_paired <- function(phylo_tree, distance_matrix, common_names, scientific_names) {
+  
+  # Create mapping from scientific names in phylo tree to user-provided common names
+  # DateLife scientific names may have underscores, user input may have spaces
+  user_common_map <- list()
+  for (i in seq_along(scientific_names)) {
+    # Try both formats
+    sci_underscore <- gsub(" ", "_", scientific_names[i])
+    sci_space <- gsub("_", " ", scientific_names[i])
+    user_common_map[[scientific_names[i]]] <- common_names[i]
+    user_common_map[[sci_underscore]] <- common_names[i]
+    user_common_map[[sci_space]] <- common_names[i]
+  }
+  
+  # Function to get user-provided common name for a species
+  get_user_common_name <- function(phylo_tip_label) {
+    # Try exact match first
+    if (phylo_tip_label %in% names(user_common_map)) {
+      return(user_common_map[[phylo_tip_label]])
+    }
+    
+    # Try with space/underscore conversion
+    tip_space <- gsub("_", " ", phylo_tip_label)
+    tip_underscore <- gsub(" ", "_", phylo_tip_label)
+    
+    if (tip_space %in% names(user_common_map)) {
+      return(user_common_map[[tip_space]])
+    }
+    if (tip_underscore %in% names(user_common_map)) {
+      return(user_common_map[[tip_underscore]])
+    }
+    
+    # Fallback - return cleaned scientific name
+    return(gsub("_", " ", phylo_tip_label))
+  }
+  
+  # Get node ages from the phylo tree
+  node_depths <- node.depth.edgelength(phylo_tree)
+  root_age <- max(node_depths)
+  node_ages <- root_age - node_depths
+  
+  n_tips <- length(phylo_tree$tip.label)
+  
+  # Create network data frame directly from phylo edges
+  network_data <- data.frame(
+    Parent = character(0),
+    Child = character(0),
+    Age = numeric(0),
+    NodeType = character(0),
+    stringsAsFactors = FALSE
+  )
+  
+  # Create consistent node label mapping
+  node_labels_map <- list()
+  ancestor_counter <- 1
+  
+  # Function to get consistent node label
+  get_node_label <- function(node_num, age_val) {
+    if (node_num <= n_tips) {
+      # Species node - use user-provided common name
+      return(get_user_common_name(phylo_tree$tip.label[node_num]))
+    } else {
+      # Internal node
+      if (!exists(as.character(node_num), node_labels_map)) {
+        # Create new ancestor label with age
+        if (!is.null(phylo_tree$node.label)) {
+          internal_index <- node_num - n_tips
+          if (length(phylo_tree$node.label) >= internal_index && !is.na(phylo_tree$node.label[internal_index])) {
+            node_labels_map[[as.character(node_num)]] <<- paste0("Ancestor ", LETTERS[ancestor_counter], " (", round(age_val, 1), " Mya)")
+          } else {
+            node_labels_map[[as.character(node_num)]] <<- paste0("Ancestor ", LETTERS[ancestor_counter], " (", round(age_val, 1), " Mya)")
+          }
+        } else {
+          node_labels_map[[as.character(node_num)]] <<- paste0("Ancestor ", LETTERS[ancestor_counter], " (", round(age_val, 1), " Mya)")
+        }
+        ancestor_counter <<- ancestor_counter + 1
+      }
+      return(node_labels_map[[as.character(node_num)]])
+    }
+  }
+  
+  # Function to get node type (same as original DateLife approach)
+  get_node_type <- function(node_num) {
+    if (node_num <= n_tips) {
+      return("species")
+    } else {
+      internal_index <- node_num - n_tips
+      if (!is.null(phylo_tree$node.label) && length(phylo_tree$node.label) >= internal_index && !is.na(phylo_tree$node.label[internal_index])) {
+        node_label <- phylo_tree$node.label[internal_index]
+        # Check if it's a generic node label (like "n1", "n2") vs a meaningful taxonomic name
+        if (grepl("^n\\d+$", node_label)) {
+          return("ancestor")  # Generic node labels should be treated as ancestors
+        } else {
+          return("taxonomic") # Meaningful taxonomic names
+        }
+      } else {
+        return("ancestor")
+      }
+    }
+  }
+  
+  # Process each edge in the phylo tree (same logic as original DateLife)
+  for (i in 1:nrow(phylo_tree$edge)) {
+    parent_num <- phylo_tree$edge[i, 1]
+    child_num <- phylo_tree$edge[i, 2]
+    
+    # Get consistent parent and child labels using mapping functions
+    parent_age_val <- if (parent_num <= n_tips) 0 else node_ages[parent_num]
+    child_age_val <- if (child_num <= n_tips) 0 else node_ages[child_num]
+    
+    parent_label <- get_node_label(parent_num, parent_age_val)
+    child_label <- get_node_label(child_num, child_age_val)
+    
+    parent_type <- get_node_type(parent_num)
+    child_type <- get_node_type(child_num)
+    
+    # Add edge to network
+    network_data <- rbind(network_data, data.frame(
+      Parent = parent_label,
+      Child = child_label,
+      Age = child_age_val,
+      NodeType = child_type,
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # Add root node (parent = NA) - same logic as original DateLife
+  # Find the root node (the parent that never appears as a child)
+  all_parents <- unique(network_data$Parent)
+  all_children <- unique(network_data$Child)
+  root_nodes <- setdiff(all_parents, all_children)
+  
+  if (length(root_nodes) > 0) {
+    root_label <- "Common ancestor - click me!"
+    network_data <- rbind(data.frame(
+      Parent = NA,
+      Child = root_label,
+      Age = root_age,
+      NodeType = "root",
+      stringsAsFactors = FALSE
+    ), data.frame(
+      Parent = root_label,
+      Child = root_nodes[1],
+      Age = root_age,
+      NodeType = "ancestor",
+      stringsAsFactors = FALSE
+    ), network_data)
+  }
+  
+  return(network_data)
+}

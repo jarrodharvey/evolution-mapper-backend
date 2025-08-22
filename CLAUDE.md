@@ -36,14 +36,14 @@ curl http://localhost:8000/api/health
 # Search species with API key in header
 curl -H "X-API-Key: YOUR-API-KEY" "http://localhost:8000/api/species?search=whale&limit=7"
 
-# Generate topology-only tree (no ages, uses common names)
-curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "species=Human,Dog,Cat" http://localhost:8000/api/tree
+# Generate topology-only tree (requires both common and scientific names)
+curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis catus" http://localhost:8000/api/tree
 
-# Generate dated tree with chronogram ages (requires scientific names, limited coverage)
-curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "species=Homo sapiens,Canis lupus" http://localhost:8000/api/dated-tree
+# Generate dated tree with chronogram ages (requires both common and scientific names)
+curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "common_names=Human,Dog&scientific_names=Homo sapiens,Canis lupus" http://localhost:8000/api/dated-tree
 
 # Generate partial tree when some species missing (allow_partial_response=true)
-curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "species=Homo sapiens,Canis lupus,Felis catus&allow_partial_response=true" http://localhost:8000/api/dated-tree
+curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis catus&allow_partial_response=true" http://localhost:8000/api/dated-tree
 
 # Random tree
 curl -H "X-API-Key: YOUR-API-KEY" "http://localhost:8000/api/random-tree?count=3"
@@ -120,8 +120,8 @@ lint("functions/tree_generation.R")
 
 ### API Endpoints
 - **GET /api/species?search=term&limit=N**: Search species by name (case-insensitive, default limit 50, max 100)
-- **POST /api/tree**: Generate topology-only phylogenetic tree from species list (common names)
-- **POST /api/dated-tree**: Generate dated phylogenetic tree with chronogram ages (scientific names required, limited coverage)
+- **POST /api/tree**: Generate topology-only phylogenetic tree from paired species lists (common + scientific names)
+- **POST /api/dated-tree**: Generate dated phylogenetic tree with chronogram ages (common + scientific names required, limited coverage)
 - **GET /api/random-tree?count=N**: Generate random tree for testing (topology only)
 - **GET /api/legend**: Get legend information for tree visualization colors and node types
 - **GET /api/health**: Health check endpoint
@@ -140,11 +140,12 @@ curl -X POST -H "X-API-Key: YOUR-API-Key" -d "species=Homo sapiens,Canis lupus,F
 
 **Key Features:**
 - Uses DateLife R package to query chronogram database
-- Requires scientific names (not common names)
+- Requires both common and scientific names (paired inputs)
 - Returns ancestor ages in millions of years (Mya)
 - Includes geological period information in tooltips
 - Handles partial coverage gracefully with detailed error responses
 - Frontend can detect partial coverage and fall back to topology trees
+- Preserves user-provided common names in tree visualization
 
 **Response Types:**
 - **Complete Coverage**: Full dated tree with all species
@@ -167,19 +168,19 @@ curl -X POST -H "X-API-Key: YOUR-API-Key" -d "species=Homo sapiens,Canis lupus,F
 ### Data Flow
 
 **Topology-Only Trees (/api/tree):**
-1. API receives species list (common names)
-2. Database lookup to get OTT IDs and scientific names
+1. API receives paired species lists (common + scientific names)
+2. Database lookup using paired names to get accurate OTT IDs
 3. rotl library fetches phylogenetic tree from Open Tree of Life  
-4. Tree converted to hierarchical structure with readable ancestor names
+4. Tree converted to hierarchical structure preserving user-provided common names
 5. CollapsibleTree generates interactive HTML visualization
 6. Color-coded nodes: Red (root), Blue (unnamed ancestors), Orange (taxonomic groups), Green (species)
 
 **Dated Trees (/api/dated-tree):**
-1. API receives species list (scientific names required)
-2. DateLife searches chronogram database for published age data
+1. API receives paired species lists (common + scientific names)
+2. DateLife searches chronogram database using scientific names for published age data
 3. If partial coverage: returns JSON with missing species list for frontend handling
 4. If full coverage: generates median consensus matrix and phylo tree with ages
-5. CollapsibleTree generates interactive HTML with age information in tooltips
+5. CollapsibleTree generates interactive HTML with age information in tooltips, preserving user-provided common names
 6. Frontend falls back to /api/tree if DateLife coverage insufficient
 
 ### Database Schema

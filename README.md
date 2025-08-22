@@ -6,6 +6,7 @@ A phylogenetic tree generation API built with R Plumber, providing interactive C
 
 - **Species Database**: 90,276+ unique species with Open Tree of Life IDs
 - **Dual Tree Types**: Topology-only trees (fast, any species) and dated trees (chronogram ages, limited coverage)
+- **Consistent Input Format**: Both APIs require paired common and scientific names for accurate species matching
 - **Interactive Trees**: Color-coded CollapsibleTree HTML visualizations with age tooltips
 - **REST API**: Clean endpoints for integration with any frontend
 - **API Key Authentication**: Secure access control for all endpoints
@@ -37,24 +38,24 @@ Search species by name (case-insensitive). Optional parameters:
 POST /api/tree
 Headers: X-API-Key: your-api-key
 Content-Type: application/x-www-form-urlencoded
-Body: species=Human,Dog,Cat
+Body: common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis catus
 ```
-Returns interactive CollapsibleTree HTML with topology only (no ages). Uses common names.
+Returns interactive CollapsibleTree HTML with topology only (no ages). **Requires both common and scientific names** for accurate species matching and consistent visualization labels.
 
-### Generate Dated Phylogenetic Tree (NEW)
+### Generate Dated Phylogenetic Tree
 ```
 POST /api/dated-tree
 Headers: X-API-Key: your-api-key
 Content-Type: application/x-www-form-urlencoded
-Body: species=Homo sapiens,Canis lupus
+Body: common_names=Human,Dog&scientific_names=Homo sapiens,Canis lupus
 ```
-Returns age-calibrated tree using DateLife chronogram database. **Requires scientific names**.
+Returns age-calibrated tree using DateLife chronogram database. **Requires both common and scientific names** - uses scientific names for chronogram lookup while preserving user-provided common names in visualization.
 
 **Coverage Limitations**: DateLife has extremely limited species coverage. Most species return no chronogram data. Frontend should attempt this endpoint first, then fall back to `/api/tree` if partial/no coverage.
 
 **Partial Response Mode**:
 ```
-Body: species=Homo sapiens,Canis lupus,Felis catus&allow_partial_response=true
+Body: common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis catus&allow_partial_response=true
 ```
 Allows tree generation with subset of species when some lack chronogram data.
 
@@ -71,6 +72,27 @@ GET /api/legend
 Headers: X-API-Key: your-api-key
 ```
 Returns color coding information for tree visualization nodes.
+
+## Input Format
+
+### Paired Species Names
+
+Both `/api/tree` and `/api/dated-tree` require **paired inputs**:
+- `common_names`: Comma-separated list of user-friendly species names
+- `scientific_names`: Comma-separated list of scientific names (same order as common names)
+
+**Benefits of Paired Format**:
+- **Consistent Visualization**: User-provided common names appear exactly as specified in the tree
+- **Accurate Database Matching**: Precise species identification using both name types
+- **Enhanced User Experience**: Predictable output with user-specified naming
+- **API Consistency**: Both endpoints handle input identically
+
+**Getting Paired Data**:
+Use `/api/species` endpoint to search and obtain both common and scientific names:
+```bash
+# Search for species to get both common and scientific names
+curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/species?search=whale&limit=3"
+```
 
 ## Project Structure
 
@@ -94,7 +116,7 @@ Required R packages:
 - `plumber` - API framework
 - `rlang` - Required for %||% operator
 - `rotl` - Open Tree of Life integration
-- `datelife` - **NEW**: Chronogram database access for dated trees
+- `datelife` - Chronogram database access for dated trees
 - `ape` - Phylogenetic tree handling
 - `collapsibleTree` - Interactive tree visualization
 - `htmlwidgets` - Widget framework
@@ -141,14 +163,14 @@ curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/species?search=wh
 # Legend information
 curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/legend"
 
-# Generate topology tree (common names)
-curl -X POST -H "X-API-Key: demo-key-12345" -d "species=Human,Dog,Cat" http://localhost:8000/api/tree
+# Generate topology tree (paired names required)
+curl -X POST -H "X-API-Key: demo-key-12345" -d "common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis catus" http://localhost:8000/api/tree
 
-# Generate dated tree (scientific names, limited coverage)
-curl -X POST -H "X-API-Key: demo-key-12345" -d "species=Homo sapiens,Canis lupus" http://localhost:8000/api/dated-tree
+# Generate dated tree (paired names required)
+curl -X POST -H "X-API-Key: demo-key-12345" -d "common_names=Human,Dog&scientific_names=Homo sapiens,Canis lupus" http://localhost:8000/api/dated-tree
 
 # Dated tree with partial response allowed
-curl -X POST -H "X-API-Key: demo-key-12345" -d "species=Homo sapiens,Canis lupus,Felis catus&allow_partial_response=true" http://localhost:8000/api/dated-tree
+curl -X POST -H "X-API-Key: demo-key-12345" -d "common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis catus&allow_partial_response=true" http://localhost:8000/api/dated-tree
 
 # Random tree
 curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/random-tree?count=3"
@@ -190,8 +212,11 @@ The script automatically:
 # Health check
 curl "http://DROPLET_ADDRESS:8000/api/health"
 
-# Authenticated endpoints
+# Search species
 curl -H "X-API-Key: demo-key-12345" "http://DROPLET_ADDRESS:8000/api/species?search=human&limit=3"
+
+# Generate tree (paired names required)
+curl -X POST -H "X-API-Key: demo-key-12345" -d "common_names=Human,Dog&scientific_names=Homo sapiens,Canis lupus" "http://DROPLET_ADDRESS:8000/api/tree"
 ```
 
 ### Manual Deployment

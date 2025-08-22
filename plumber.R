@@ -37,6 +37,19 @@ library(DBI)
 library(RSQLite)
 library(jsonlite)
 
+# Shared function for parsing species input (used by both APIs)
+parse_species_input <- function(input) {
+  if (is.character(input)) {
+    if (startsWith(input, "[") && endsWith(input, "]")) {
+      return(jsonlite::fromJSON(input))
+    } else {
+      return(trimws(strsplit(input, ",")[[1]]))
+    }
+  } else {
+    return(input)
+  }
+}
+
 # Simple in-memory rate limiting - tracks requests per IP
 rate_limit_storage <- new.env()
 rate_limit_window <- 60  # seconds
@@ -229,37 +242,38 @@ function(search = NULL, limit = 50) {
   })
 }
 
-#* Generate phylogenetic tree from list of species common names
-#* @param species A JSON array of species common names
+#* Generate phylogenetic tree from list of species with both common and scientific names
+#* @param common_names A JSON array of species common names
+#* @param scientific_names A JSON array of species scientific names (must match common_names length)
 #* @post /api/tree
-function(req, species = NULL) {
-  if (is.null(species)) {
+function(req, common_names = NULL, scientific_names = NULL) {
+  if (is.null(common_names) || is.null(scientific_names)) {
     return(list(
       success = FALSE,
-      error = "Missing required parameter 'species'"
+      error = "Missing required parameters 'common_names' and 'scientific_names'",
+      note = "Both parameters must be provided as equal-length arrays"
     ))
   }
   
-  # Handle both JSON array and comma-separated string formats
-  if (is.character(species)) {
-    # If it's a single string, try parsing as JSON or split by comma
-    if (startsWith(species, "[") && endsWith(species, "]")) {
-      species_list <- jsonlite::fromJSON(species)
-    } else {
-      species_list <- trimws(strsplit(species, ",")[[1]])
-    }
-  } else {
-    species_list <- species
+  # Parse both input parameters using shared function
+  common_list <- parse_species_input(common_names)
+  scientific_list <- parse_species_input(scientific_names)
+  
+  if (length(common_list) != length(scientific_list)) {
+    return(list(
+      success = FALSE,
+      error = "common_names and scientific_names must have the same length"
+    ))
   }
   
-  if (length(species_list) < 2) {
+  if (length(common_list) < 2) {
     return(list(
       success = FALSE,
       error = "At least 2 species required for tree generation"
     ))
   }
   
-  result <- generate_tree_html(species_list)
+  result <- generate_tree_html_paired(common_list, scientific_list)
   return(result)
 }
 
@@ -362,30 +376,31 @@ function(count = NULL) {
 }
 
 #* Generate dated phylogenetic tree using DateLife chronograms
-#* @param species A JSON array of species scientific names
+#* @param common_names A JSON array of species common names
+#* @param scientific_names A JSON array of species scientific names (must match common_names length)
 #* @param allow_partial_response Boolean to allow partial coverage trees (default false)
 #* @post /api/dated-tree
-function(req, species = NULL, allow_partial_response = FALSE) {
-  if (is.null(species)) {
+function(req, common_names = NULL, scientific_names = NULL, allow_partial_response = FALSE) {
+  if (is.null(common_names) || is.null(scientific_names)) {
     return(list(
       success = FALSE,
-      error = "Missing required parameter 'species'",
-      note = "This endpoint requires scientific names, not common names"
+      error = "Missing required parameters 'common_names' and 'scientific_names'",
+      note = "Both parameters must be provided as equal-length arrays"
     ))
   }
   
-  # Handle both JSON array and comma-separated string formats
-  if (is.character(species)) {
-    if (startsWith(species, "[") && endsWith(species, "]")) {
-      species_list <- jsonlite::fromJSON(species)
-    } else {
-      species_list <- trimws(strsplit(species, ",")[[1]])
-    }
-  } else {
-    species_list <- species
+  # Parse both input parameters using shared function
+  common_list <- parse_species_input(common_names)
+  scientific_list <- parse_species_input(scientific_names)
+  
+  if (length(common_list) != length(scientific_list)) {
+    return(list(
+      success = FALSE,
+      error = "common_names and scientific_names must have the same length"
+    ))
   }
   
-  if (length(species_list) < 2) {
+  if (length(common_list) < 2) {
     return(list(
       success = FALSE,
       error = "At least 2 species required for tree generation"
@@ -407,17 +422,18 @@ function(req, species = NULL, allow_partial_response = FALSE) {
     library(datelife)
     library(ape)
     
-    # Try DateLife with the input species
-    cat("Attempting DateLife with species:", paste(species_list, collapse = ", "), "\n")
+    # Try DateLife with the scientific names
+    cat("Attempting DateLife with species:", paste(scientific_list, collapse = ", "), "\n")
     
-    datelife_result <- get_datelife_result(input = species_list)
+    datelife_result <- get_datelife_result(input = scientific_list)
     
     if (length(datelife_result) == 0) {
       return(list(
         success = FALSE,
         coverage = "none",
         error = "No chronogram data available for any of the input species",
-        input_species = species_list,
+        input_common_names = common_list,
+        input_scientific_names = scientific_list,
         note = "Try the regular /api/tree endpoint for topology-only trees"
       ))
     }
@@ -425,18 +441,23 @@ function(req, species = NULL, allow_partial_response = FALSE) {
     # Check which species are covered
     first_matrix <- datelife_result[[1]]
     covered_species <- rownames(first_matrix)
-    missing_species <- setdiff(species_list, gsub("_", " ", covered_species))
+    missing_indices <- which(!scientific_list %in% gsub("_", " ", covered_species))
     
-    if (length(missing_species) > 0) {
+    if (length(missing_indices) > 0) {
+      missing_scientific <- scientific_list[missing_indices]
+      missing_common <- common_list[missing_indices]
+      
       if (!allow_partial) {
         # Return error response for partial coverage
         return(list(
           success = FALSE,
           coverage = "partial",
           error = "Some species not found in chronogram database",
-          input_species = species_list,
+          input_common_names = common_list,
+          input_scientific_names = scientific_list,
           covered_species = gsub("_", " ", covered_species),
-          missing_species = missing_species,
+          missing_common_names = missing_common,
+          missing_scientific_names = missing_scientific,
           note = "DateLife can only generate trees for species with published chronogram data"
         ))
       } else {
@@ -458,8 +479,8 @@ function(req, species = NULL, allow_partial_response = FALSE) {
     node_depths <- node.depth.edgelength(phylo_tree)
     root_age <- max(node_depths)
     
-    # Convert to CollapsibleTree-compatible format with ages
-    result <- generate_dated_tree_html(phylo_tree, median_matrix, species_list)
+    # Convert to CollapsibleTree-compatible format with ages using both names
+    result <- generate_dated_tree_html_paired(phylo_tree, median_matrix, common_list, scientific_list)
     
     if (result$success) {
       result$datelife_info <- list(
@@ -470,13 +491,15 @@ function(req, species = NULL, allow_partial_response = FALSE) {
       )
       
       # Add partial coverage information if applicable
-      if (length(missing_species) > 0) {
+      if (length(missing_indices) > 0) {
         result$coverage <- "partial"
-        result$missing_species <- missing_species
-        result$input_species <- species_list
+        result$missing_common_names <- missing_common
+        result$missing_scientific_names <- missing_scientific
+        result$input_common_names <- common_list
+        result$input_scientific_names <- scientific_list
         result$datelife_info$coverage_note <- paste0(
           "Partial coverage: ", length(covered_species), " of ", 
-          length(species_list), " species included"
+          length(scientific_list), " species included"
         )
       } else {
         result$coverage <- "complete"
@@ -489,7 +512,8 @@ function(req, species = NULL, allow_partial_response = FALSE) {
     return(list(
       success = FALSE,
       error = paste("DateLife processing error:", conditionMessage(e)),
-      input_species = species_list
+      input_common_names = common_list,
+      input_scientific_names = scientific_list
     ))
   })
 }

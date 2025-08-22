@@ -27,7 +27,63 @@ calculate_dynamic_link_length <- function(network_data, base_length = 80, char_m
   return(dynamic_length)
 }
 
-# Function to get species from database
+# Function to get species from database using paired common and scientific names
+get_species_from_db_paired <- function(common_names, scientific_names) {
+  db_path <- "data/species.sqlite"
+  species_db <- dbConnect(SQLite(), db_path)
+  
+  species_data <- data.frame(
+    ott = integer(length(common_names)),
+    common = character(length(common_names)),
+    scientific = character(length(common_names)),
+    stringsAsFactors = FALSE
+  )
+  
+  for (i in seq_along(common_names)) {
+    common_name <- common_names[i]
+    scientific_name <- scientific_names[i]
+    
+    # Try to find exact match with both common and scientific names
+    sql_string <- sprintf("SELECT * FROM species WHERE common = '%s' AND scientific = '%s'", 
+                         gsub("'", "''", common_name), gsub("'", "''", scientific_name))
+    query_result <- dbSendQuery(species_db, sql_string)
+    species_df <- dbFetch(query_result)
+    dbClearResult(query_result)
+    
+    if (nrow(species_df) > 0) {
+      # Found exact match - use it
+      species_data[i, ] <- species_df[1, ]
+    } else {
+      # No exact match - try scientific name only (more reliable for OTT lookup)
+      sql_string <- sprintf("SELECT * FROM species WHERE scientific = '%s'", 
+                           gsub("'", "''", scientific_name))
+      query_result <- dbSendQuery(species_db, sql_string)
+      species_df <- dbFetch(query_result)
+      dbClearResult(query_result)
+      
+      if (nrow(species_df) > 0) {
+        # Found by scientific name - use provided common name but database OTT and scientific
+        species_data[i, ] <- data.frame(
+          ott = species_df$ott[1],
+          common = common_name,  # Use user-provided common name
+          scientific = species_df$scientific[1]
+        )
+      } else {
+        # No match found - create placeholder
+        species_data[i, ] <- data.frame(
+          ott = NA,
+          common = common_name,
+          scientific = scientific_name
+        )
+      }
+    }
+  }
+  
+  dbDisconnect(species_db)
+  return(species_data)
+}
+
+# Legacy function for backward compatibility (deprecated)
 get_species_from_db <- function(common_names) {
   db_path <- "data/species.sqlite"
   species_db <- dbConnect(SQLite(), db_path)
@@ -370,4 +426,209 @@ generate_tree_html <- function(species_names) {
       error = paste("Error generating tree:", conditionMessage(e))
     ))
   })
+}
+
+# Generate tree HTML from paired common and scientific names (ROTL topology only)
+generate_tree_html_paired <- function(common_names, scientific_names) {
+  tryCatch({
+    cat("=== GENERATING TOPOLOGY-ONLY TREE WITH PAIRED NAMES ===\n")
+    
+    # Get species data from database using paired approach
+    species_data <- get_species_from_db_paired(common_names, scientific_names)
+    
+    # Check for missing OTT IDs
+    valid_species <- species_data[!is.na(species_data$ott), ]
+    
+    if (nrow(valid_species) < 2) {
+      missing_indices <- which(is.na(species_data$ott))
+      missing_common <- species_data$common[missing_indices]
+      missing_scientific <- species_data$scientific[missing_indices]
+      return(list(
+        success = FALSE,
+        error = "Insufficient species with valid OTT IDs for tree generation",
+        missing_common_names = missing_common,
+        missing_scientific_names = missing_scientific,
+        note = "At least 2 species with valid OTT IDs are required"
+      ))
+    }
+    
+    # Get tree from Open Tree of Life using OTT IDs
+    cat("Fetching tree from Open Tree of Life...\n")
+    tree <- tol_induced_subtree(ott_ids = valid_species$ott)
+    
+    if (is.null(tree)) {
+      return(list(
+        success = FALSE,
+        error = "Failed to get tree from Open Tree of Life"
+      ))
+    }
+    
+    # Convert phylo tree to network format - preserve user-provided common names
+    network_data <- convert_phylo_to_network_paired(tree, valid_species)
+    
+    if (is.null(network_data) || nrow(network_data) == 0) {
+      return(list(
+        success = FALSE,
+        error = "Failed to convert tree to network format"
+      ))
+    }
+    
+    # Calculate dynamic link length
+    link_length <- calculate_dynamic_link_length(network_data)
+    
+    # Prepare data frame for collapsibleTreeNetwork (Parent, Child format)
+    tree_data <- data.frame(
+      Parent = network_data$from,
+      Child = network_data$to,
+      NodeType = network_data$NodeType,
+      stringsAsFactors = FALSE
+    )
+    
+    # Add color mapping based on node type (same as ROTL approach)
+    tree_data$Color <- sapply(tree_data$NodeType, function(type) {
+      switch(type,
+        "root" = "#E74C3C",        # Red for root
+        "ancestor" = "#3498DB",     # Blue for ancestors  
+        "taxonomic" = "#F39C12",    # Orange for taxonomic groups
+        "species" = "#27AE60",      # Green for species
+        "#999999"                   # Default gray
+      )
+    })
+    
+    # Create collapsibleTree with proper color mapping
+    tree_widget <- collapsibleTreeNetwork(
+      tree_data,
+      attribute = "NodeType",
+      fill = "Color", 
+      fontSize = 12,
+      linkLength = link_length,
+      nodeSize = "leafCount",
+      width = 900,
+      height = 700,
+      zoomable = TRUE
+    )
+    
+    # Convert to HTML using temporary file approach
+    temp_file <- tempfile(fileext = ".html")
+    htmlwidgets::saveWidget(tree_widget, temp_file, selfcontained = TRUE)
+    tree_html <- paste(readLines(temp_file), collapse = "\n")
+    unlink(temp_file)  # Clean up temp file
+    
+    return(list(
+      success = TRUE,
+      html = tree_html,
+      species_count = nrow(valid_species),
+      tree_type = "topology_only",
+      data_source = "Open Tree of Life",
+      input_common_names = common_names,
+      input_scientific_names = scientific_names
+    ))
+    
+  }, error = function(e) {
+    return(list(
+      success = FALSE,
+      error = paste("Error generating paired tree:", conditionMessage(e))
+    ))
+  })
+}
+
+# Convert phylo tree to network format preserving user-provided common names
+convert_phylo_to_network_paired <- function(phylo_tree, species_data) {
+  # Basic tree information
+  n_tips <- length(phylo_tree$tip.label)
+  n_nodes <- phylo_tree$Nnode
+  cat(sprintf("Processing paired tree with %d tips and %d internal nodes\n", n_tips, n_nodes))
+  
+  # Build network data frame directly from edge matrix
+  network_data <- data.frame(
+    from = character(0),
+    to = character(0),
+    NodeType = character(0),
+    stringsAsFactors = FALSE
+  )
+  
+  # Convert each edge to parent-child relationship
+  for (i in 1:nrow(phylo_tree$edge)) {
+    parent_num <- phylo_tree$edge[i, 1]
+    child_num <- phylo_tree$edge[i, 2]
+    
+    # Determine parent label
+    if (parent_num <= n_tips) {
+      # Parent is a tip (shouldn't happen in proper trees)
+      parent_label <- species_data$common[parent_num]
+    } else {
+      # Parent is internal node
+      internal_index <- parent_num - n_tips
+      if (!is.null(phylo_tree$node.label) && length(phylo_tree$node.label) >= internal_index && !is.na(phylo_tree$node.label[internal_index]) && nchar(trimws(phylo_tree$node.label[internal_index])) > 0 && !grepl("^[Mm]rcaott\\d+ott\\d+", phylo_tree$node.label[internal_index])) {
+        parent_label <- convert_to_readable_name(phylo_tree$node.label[internal_index])
+      } else {
+        parent_label <- paste("Ancestor", LETTERS[min(internal_index, 26)])
+      }
+    }
+    
+    # Determine child label and type
+    if (child_num <= n_tips) {
+      # Child is a tip (species) - use user-provided common name
+      child_label <- species_data$common[child_num]
+      child_type <- "species"
+    } else {
+      # Child is internal node
+      internal_index <- child_num - n_tips
+      if (!is.null(phylo_tree$node.label) && length(phylo_tree$node.label) >= internal_index && !is.na(phylo_tree$node.label[internal_index]) && nchar(trimws(phylo_tree$node.label[internal_index])) > 0 && !grepl("^[Mm]rcaott\\d+ott\\d+", phylo_tree$node.label[internal_index])) {
+        child_label <- convert_to_readable_name(phylo_tree$node.label[internal_index])
+        child_type <- "taxonomic"
+      } else {
+        child_label <- paste("Ancestor", LETTERS[min(internal_index, 26)])
+        child_type <- "ancestor"
+      }
+    }
+    
+    # Add edge to network
+    network_data <- rbind(network_data, data.frame(
+      from = parent_label,
+      to = child_label,
+      NodeType = child_type,
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # Add proper root handling for collapsibleTreeNetwork (same logic as original)
+  if (nrow(network_data) > 0) {
+    # Find orphaned parents (parents that are never children) from network data
+    all_parents <- unique(network_data$from)
+    all_children <- unique(network_data$to)
+    orphaned_parents <- setdiff(all_parents, all_children)
+    
+    # Connect all orphaned parents to a single root
+    root_name <- "Common ancestor - click me!"
+    
+    if (length(orphaned_parents) > 0) {
+      # For each orphaned parent, connect it to the root with correct node type
+      for (orphaned_parent in orphaned_parents) {
+        # Determine node type based on the name
+        if (grepl("^Ancestor [A-Z]$", orphaned_parent)) {
+          node_type <- "ancestor"
+        } else {
+          node_type <- "taxonomic"
+        }
+        
+        network_data <- rbind(data.frame(
+          from = root_name,
+          to = orphaned_parent,
+          NodeType = node_type,
+          stringsAsFactors = FALSE
+        ), network_data)
+      }
+    }
+    
+    # Add root row with NA parent (required by collapsibleTreeNetwork)
+    network_data <- rbind(data.frame(
+      from = NA,
+      to = root_name,
+      NodeType = "root",
+      stringsAsFactors = FALSE
+    ), network_data)
+  }
+  
+  return(network_data)
 }
