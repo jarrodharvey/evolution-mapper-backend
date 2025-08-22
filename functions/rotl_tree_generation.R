@@ -555,7 +555,15 @@ convert_phylo_to_network_paired <- function(phylo_tree, species_data) {
     # Determine parent label
     if (parent_num <= n_tips) {
       # Parent is a tip (shouldn't happen in proper trees)
-      parent_label <- species_data$common[parent_num]
+      tip_label <- phylo_tree$tip.label[parent_num]
+      tip_clean <- gsub("_ott\\d+", "", tip_label)
+      tip_clean <- gsub("_", " ", tip_clean)
+      match_idx <- which(species_data$scientific == tip_clean)
+      if (length(match_idx) > 0) {
+        parent_label <- species_data$common[match_idx[1]]
+      } else {
+        parent_label <- tip_clean
+      }
     } else {
       # Parent is internal node
       internal_index <- parent_num - n_tips
@@ -568,8 +576,18 @@ convert_phylo_to_network_paired <- function(phylo_tree, species_data) {
     
     # Determine child label and type
     if (child_num <= n_tips) {
-      # Child is a tip (species) - use user-provided common name
-      child_label <- species_data$common[child_num]
+      # Child is a tip (species) - find correct mapping by scientific name
+      tip_label <- phylo_tree$tip.label[child_num]
+      tip_clean <- gsub("_ott\\d+", "", tip_label)
+      tip_clean <- gsub("_", " ", tip_clean)
+      
+      # Find matching species in species_data by scientific name
+      match_idx <- which(species_data$scientific == tip_clean)
+      if (length(match_idx) > 0) {
+        child_label <- species_data$common[match_idx[1]]
+      } else {
+        child_label <- tip_clean  # fallback
+      }
       child_type <- "species"
     } else {
       # Child is internal node

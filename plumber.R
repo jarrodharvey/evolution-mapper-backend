@@ -211,16 +211,26 @@ function(search = NULL, limit = 50) {
     
     if (is.null(search) || search == "") {
       query <- paste0(
-        "SELECT common, scientific, ott FROM species ",
-        "WHERE ott IS NOT NULL AND ott != '' AND common IS NOT NULL ",
-        "ORDER BY common LIMIT ", limit
+        "SELECT common, scientific, ott FROM (",
+        "  SELECT common, scientific, ott, ",
+        "  ROW_NUMBER() OVER (PARTITION BY common ORDER BY RANDOM()) as rn ",
+        "  FROM species ",
+        "  WHERE ott IS NOT NULL AND ott != '' AND common IS NOT NULL",
+        ") ranked ",
+        "WHERE rn = 1 ",
+        "ORDER BY LENGTH(common), common LIMIT ", limit
       )
     } else {
       query <- paste0(
-        "SELECT common, scientific, ott FROM species ",
-        "WHERE ott IS NOT NULL AND ott != '' AND common IS NOT NULL ",
-        "AND (common LIKE '%", gsub("'", "''", search), "%' OR scientific LIKE '%", gsub("'", "''", search), "%') ",
-        "ORDER BY common LIMIT ", limit
+        "SELECT common, scientific, ott FROM (",
+        "  SELECT common, scientific, ott, ",
+        "  ROW_NUMBER() OVER (PARTITION BY common ORDER BY RANDOM()) as rn ",
+        "  FROM species ",
+        "  WHERE ott IS NOT NULL AND ott != '' AND common IS NOT NULL ",
+        "  AND (common LIKE '%", gsub("'", "''", search), "%' OR scientific LIKE '%", gsub("'", "''", search), "%')",
+        ") ranked ",
+        "WHERE rn = 1 ",
+        "ORDER BY LENGTH(common), common LIMIT ", limit
       )
     }
     
@@ -362,15 +372,25 @@ function(count = NULL) {
     random_species <- random_species_data$common
     result <- generate_tree_html(random_species)
     
-    # Always include selected species for debugging
-    result$selected_species <- random_species
+    # Always include selected species for debugging with both common and scientific names
+    result$selected_species <- list(
+      common_names = random_species_data$common,
+      scientific_names = random_species_data$scientific
+    )
     
     return(result)
   }, error = function(e) {
     return(list(
       success = FALSE,
       error = paste("Error generating random tree:", conditionMessage(e)),
-      selected_species = if(exists("random_species")) random_species else "unknown"
+      selected_species = if(exists("random_species_data") && nrow(random_species_data) > 0) {
+        list(
+          common_names = random_species_data$common,
+          scientific_names = random_species_data$scientific
+        )
+      } else {
+        list(common_names = "unknown", scientific_names = "unknown")
+      }
     ))
   })
 }
