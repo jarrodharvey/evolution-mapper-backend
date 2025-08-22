@@ -6,7 +6,7 @@
 library(analogsea)
 
 # Configuration
-REQUIRED_FILES <- c("plumber.R", "functions/tree_generation.R", "data/species.sqlite")
+REQUIRED_FILES <- c("plumber.R", "functions/tree_generation.R", "functions/datelife_tree_generation.R", "data/species.sqlite")
 FIREWALL_NAME <- "evolution-mapper-restricted"
 
 # Load environment variables from .Renviron
@@ -153,7 +153,7 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
     ubuntu_apt_get_install(droplet, "libcurl4-openssl-dev", "libssl-dev", "libxml2-dev", "libsqlite3-dev", "pandoc")
     
     # Install R packages
-    required_packages <- c("plumber", "rlang", "rotl", "ape", "collapsibleTree", "htmlwidgets", "RSQLite", "DBI", "dplyr")
+    required_packages <- c("plumber", "rlang", "rotl", "ape", "collapsibleTree", "htmlwidgets", "RSQLite", "DBI", "dplyr", "datelife", "colorspace", "jsonlite")
     
     cat("Installing R packages:", paste(required_packages, collapse = ", "), "\n")
     for (pkg in required_packages) {
