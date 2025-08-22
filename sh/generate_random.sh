@@ -59,7 +59,7 @@ fi
 if [[ -s "$OUTPUT_FILE" ]] && [[ "$(head -1 "$OUTPUT_FILE")" == "<!DOCTYPE html>" ]]; then
     echo "✅ Successfully generated $OUTPUT_FILE"
     echo "   File size: $(wc -c < "$OUTPUT_FILE") bytes"
-    echo "   Open in browser: file://$(pwd)/$OUTPUT_FILE"
+    open "$OUTPUT_FILE"
 else
     echo "❌ Failed to generate valid HTML file"
     echo "   Content preview:"

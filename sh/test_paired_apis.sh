@@ -57,8 +57,8 @@ if [[ "$TREE_SUCCESS" == "true" ]]; then
     echo "   Input scientific names: $INPUT_SCIENTIFIC"
     
     # Save tree
-    echo "$TREE_RESPONSE" | jq -r '.html[0] // .html' > "claude/test_paired_topology_tree.html" 2>/dev/null
-    echo "   💾 Tree saved to: claude/test_paired_topology_tree.html"
+    echo "$TREE_RESPONSE" | jq -r '.html[0] // .html' > "sh/test_paired_topology_tree.html" 2>/dev/null
+    echo "   💾 Tree saved to: sh/test_paired_topology_tree.html"
     
 else
     echo "❌ FAILED: Topology tree generation failed"
@@ -111,8 +111,8 @@ if [[ "$DATED_SUCCESS" == "true" ]]; then
     fi
     
     # Save tree
-    echo "$DATED_RESPONSE" | jq -r '.html[0] // .html' > "claude/test_paired_dated_tree.html" 2>/dev/null
-    echo "   💾 Tree saved to: claude/test_paired_dated_tree.html"
+    echo "$DATED_RESPONSE" | jq -r '.html[0] // .html' > "sh/test_paired_dated_tree.html" 2>/dev/null
+    echo "   💾 Tree saved to: sh/test_paired_dated_tree.html"
     
 else
     echo "❌ FAILED: Dated tree generation failed"
@@ -180,6 +180,6 @@ echo "✅ User-provided common names are preserved in tree visualization"
 echo "✅ Error handling works for mismatched lengths and missing parameters"
 echo "✅ DateLife partial coverage handling with allow_partial_response parameter"
 echo ""
-echo "🌐 View trees:"
-echo "   open claude/test_paired_topology_tree.html"
-echo "   open claude/test_paired_dated_tree.html"
+echo "🌐 Opening trees..."
+open "sh/test_paired_topology_tree.html" 2>/dev/null
+open "sh/test_paired_dated_tree.html" 2>/dev/null

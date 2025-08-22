@@ -23,7 +23,7 @@ if [ -z "$1" ]; then
 else
     COUNT=$1
 fi
-OUTPUT_FILE=${2:-"claude/random_dated_tree.html"}
+OUTPUT_FILE=${2:-"sh/random_dated_tree.html"}
 
 # Predefined list of species more likely to have DateLife coverage
 # Based on commonly studied species in molecular clock studies
@@ -148,7 +148,7 @@ if echo "$DATELIFE_RESPONSE" | grep -q '"success":\[*true' || echo "$DATELIFE_RE
         echo "📚 Data source: $DATA_SOURCE"
         echo "🎯 Tree type: Dated chronogram with ancestral ages"
         echo ""
-        echo "🌐 Open file: open $OUTPUT_FILE"
+        open "$OUTPUT_FILE"
         
         exit 0
     else
