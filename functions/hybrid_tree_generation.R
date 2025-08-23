@@ -44,10 +44,21 @@ generate_hybrid_tree_html <- function(common_names, scientific_names) {
     valid_species <- species_data[!is.na(species_data$ott), ]
     
     if (nrow(valid_species) < 2) {
+      # Find missing species for both OTT ID lookup and consistency with /api/dated-tree format
+      missing_indices <- which(is.na(species_data$ott))
+      missing_common <- if (length(missing_indices) > 0) species_data$common[missing_indices] else c()
+      missing_scientific <- if (length(missing_indices) > 0) species_data$scientific[missing_indices] else c()
+      
       return(list(
         success = FALSE,
         error = "Insufficient species with valid OTT IDs for tree generation",
-        missing_species = species_data$common[is.na(species_data$ott)]
+        missing_species = missing_common,  # Keep for backwards compatibility
+        # Add missing species fields for frontend compatibility (like /api/dated-tree)
+        missing_common_names = missing_common,
+        missing_scientific_names = missing_scientific,
+        input_common_names = common_names,
+        input_scientific_names = scientific_names,
+        coverage = "insufficient_data"
       ))
     }
     
@@ -125,6 +136,18 @@ generate_hybrid_tree_html <- function(common_names, scientific_names) {
     # Step 5: Create visualization
     tree_html <- create_hybrid_tree_visualization(network_data)
     
+    # Determine which species are missing age data (similar to /api/dated-tree)
+    species_without_ages_scientific <- setdiff(scientific_names, datelife_species)
+    species_without_ages_common <- c()
+    
+    # Map scientific names back to common names for missing species
+    for (sci_name in species_without_ages_scientific) {
+      match_idx <- which(scientific_names == sci_name)
+      if (length(match_idx) > 0) {
+        species_without_ages_common <- c(species_without_ages_common, common_names[match_idx[1]])
+      }
+    }
+    
     return(list(
       success = TRUE,
       html = tree_html,
@@ -135,13 +158,21 @@ generate_hybrid_tree_html <- function(common_names, scientific_names) {
       input_common_names = common_names,
       input_scientific_names = scientific_names,
       species_with_ages = datelife_species,
-      species_without_ages = setdiff(scientific_names, datelife_species)
+      species_without_ages = species_without_ages_scientific,
+      # Add missing species fields for frontend compatibility (like /api/dated-tree)
+      missing_common_names = species_without_ages_common,
+      missing_scientific_names = species_without_ages_scientific,
+      coverage = if (length(species_without_ages_scientific) == 0) "complete" else "partial"
     ))
     
   }, error = function(e) {
     return(list(
       success = FALSE,
-      error = paste("Error generating hybrid tree:", conditionMessage(e))
+      error = paste("Error generating hybrid tree:", conditionMessage(e)),
+      input_common_names = common_names,
+      input_scientific_names = scientific_names,
+      missing_common_names = c(),  # Initialize empty for frontend compatibility
+      missing_scientific_names = c()  # Initialize empty for frontend compatibility
     ))
   })
 }
