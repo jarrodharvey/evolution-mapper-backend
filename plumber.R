@@ -70,6 +70,11 @@ if (nzchar(api_keys_env)) {
 #* @apiTitle Evolution Mapper API
 #* @apiDescription API for generating phylogenetic trees and species data
 
+#* @plumber
+function(pr) {
+  pr %>% pr_set_docs("swagger")
+}
+
 #* API Key authentication filter
 #* @filter apikey
 function(req, res) {
