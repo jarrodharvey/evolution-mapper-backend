@@ -31,6 +31,7 @@ function(req, res) {
 # Source tree generation functions
 source("functions/rotl_tree_generation.R")
 source("functions/datelife_tree_generation.R")
+source("functions/hybrid_tree_generation.R")
 
 # Required libraries
 library(DBI)
@@ -542,6 +543,41 @@ function(req, common_names = NULL, scientific_names = NULL, allow_partial_respon
       input_scientific_names = scientific_list
     ))
   })
+}
+
+#* Generate hybrid phylogenetic tree with complete ROTL structure and DateLife ages where available
+#* @param common_names A JSON array of species common names
+#* @param scientific_names A JSON array of species scientific names (must match common_names length)
+#* @post /api/full-tree-dated
+function(req, common_names = NULL, scientific_names = NULL) {
+  if (is.null(common_names) || is.null(scientific_names)) {
+    return(list(
+      success = FALSE,
+      error = "Missing required parameters 'common_names' and 'scientific_names'",
+      note = "Both parameters must be provided as equal-length arrays"
+    ))
+  }
+  
+  # Parse both input parameters using shared function
+  common_list <- parse_species_input(common_names)
+  scientific_list <- parse_species_input(scientific_names)
+  
+  if (length(common_list) != length(scientific_list)) {
+    return(list(
+      success = FALSE,
+      error = "common_names and scientific_names must have the same length"
+    ))
+  }
+  
+  if (length(common_list) < 2) {
+    return(list(
+      success = FALSE,
+      error = "At least 2 species required for tree generation"
+    ))
+  }
+  
+  result <- generate_hybrid_tree_html(common_list, scientific_list)
+  return(result)
 }
 
 #* Debug endpoint - returns data structure instead of HTML tree
