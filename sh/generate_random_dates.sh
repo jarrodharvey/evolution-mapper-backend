@@ -126,7 +126,7 @@ if echo "$DATELIFE_RESPONSE" | grep -q '"success":\[*true' || echo "$DATELIFE_RE
         COVERED_SPECIES=$(echo "$DATELIFE_RESPONSE" | jq -r '.datelife_info.covered_species | join(", ") // "unknown"')
         DATA_SOURCE=$(echo "$DATELIFE_RESPONSE" | jq -r '.datelife_info.data_source // "unknown"')
         COVERAGE=$(echo "$DATELIFE_RESPONSE" | jq -r '.coverage // "unknown"')
-        MISSING_SPECIES=$(echo "$DATELIFE_RESPONSE" | jq -r '.missing_species | join(", ") // "none"')
+        MISSING_SPECIES=$(echo "$DATELIFE_RESPONSE" | jq -r '.missing_common_names | join(", ") // "none"')
         COVERAGE_NOTE=$(echo "$DATELIFE_RESPONSE" | jq -r '.datelife_info.coverage_note // ""')
         
         echo ""
@@ -162,7 +162,7 @@ elif echo "$DATELIFE_RESPONSE" | grep -q '"coverage":\[*"partial"' || echo "$DAT
     echo "⚠ DateLife PARTIAL COVERAGE (unexpected - should have generated tree)"
     
     # Extract coverage information (handle array formats)
-    MISSING_SPECIES=$(echo "$DATELIFE_RESPONSE" | jq -r 'if (.missing_species | type) == "array" then (.missing_species | join(", ")) else (.missing_species // "unknown") end')
+    MISSING_SPECIES=$(echo "$DATELIFE_RESPONSE" | jq -r 'if (.missing_common_names | type) == "array" then (.missing_common_names | join(", ")) else (.missing_common_names // "unknown") end')
     COVERED_SPECIES=$(echo "$DATELIFE_RESPONSE" | jq -r 'if (.covered_species | type) == "array" then (.covered_species | join(", ")) else (.covered_species // "unknown") end')
     ERROR_MSG=$(echo "$DATELIFE_RESPONSE" | jq -r 'if (.error | type) == "array" then .error[0] else (.error // "unknown") end')
     

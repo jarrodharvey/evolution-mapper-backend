@@ -463,6 +463,10 @@ function(req, common_names = NULL, scientific_names = NULL, allow_partial_respon
     covered_species <- rownames(first_matrix)
     missing_indices <- which(!scientific_list %in% gsub("_", " ", covered_species))
     
+    # Initialize missing species variables
+    missing_scientific <- c()
+    missing_common <- c()
+    
     if (length(missing_indices) > 0) {
       missing_scientific <- scientific_list[missing_indices]
       missing_common <- common_list[missing_indices]
@@ -480,10 +484,11 @@ function(req, common_names = NULL, scientific_names = NULL, allow_partial_respon
           missing_scientific_names = missing_scientific,
           note = "DateLife can only generate trees for species with published chronogram data"
         ))
-      } else {
-        # Generate tree with available species when allow_partial is true
-        cat("Partial coverage allowed! Generating tree with", length(covered_species), "covered species...\n")
       }
+      
+      # When allow_partial is true, continue to generate tree with available species
+      # Missing species info will be included in the final response
+      cat("Partial coverage allowed! Generating tree with", length(covered_species), "covered species...\n")
     }
     
     # All species are covered - generate the dated tree
@@ -510,13 +515,14 @@ function(req, common_names = NULL, scientific_names = NULL, allow_partial_respon
         data_source = "DateLife chronogram database"
       )
       
-      # Add partial coverage information if applicable
+      # Add coverage information (always include missing species fields for frontend compatibility)
+      result$missing_common_names <- missing_common
+      result$missing_scientific_names <- missing_scientific
+      result$input_common_names <- common_list
+      result$input_scientific_names <- scientific_list
+      
       if (length(missing_indices) > 0) {
         result$coverage <- "partial"
-        result$missing_common_names <- missing_common
-        result$missing_scientific_names <- missing_scientific
-        result$input_common_names <- common_list
-        result$input_scientific_names <- scientific_list
         result$datelife_info$coverage_note <- paste0(
           "Partial coverage: ", length(covered_species), " of ", 
           length(scientific_list), " species included"
