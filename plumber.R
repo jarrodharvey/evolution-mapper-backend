@@ -51,6 +51,15 @@ parse_species_input <- function(input) {
   }
 }
 
+# Clean scientific names by removing parenthetical addendums
+clean_scientific_names <- function(scientific_names) {
+  # Remove parenthetical addendums like "(species in domain Eukaryota)"
+  # but preserve the main binomial name
+  cleaned <- gsub("\\s*\\([^)]+\\)\\s*$", "", scientific_names)
+  cleaned <- trimws(cleaned)  # Remove any trailing whitespace
+  return(cleaned)
+}
+
 # Simple in-memory rate limiting - tracks requests per IP
 rate_limit_storage <- new.env()
 rate_limit_window <- 60  # seconds
@@ -421,16 +430,25 @@ function(req, common_names = NULL, scientific_names = NULL, allow_partial_respon
     library(datelife)
     library(ape)
     
-    # Try DateLife with the scientific names with timeout
-    cat("Attempting DateLife with species:", paste(scientific_list, collapse = ", "), "\n")
+    # Clean scientific names to remove parenthetical addendums that can cause phylocom parsing issues
+    cleaned_scientific_list <- clean_scientific_names(scientific_list)
+    cat("Cleaned scientific names for DateLife query:\n")
+    for (i in seq_along(scientific_list)) {
+      if (scientific_list[i] != cleaned_scientific_list[i]) {
+        cat("  ", scientific_list[i], " -> ", cleaned_scientific_list[i], "\n")
+      }
+    }
+    
+    # Try DateLife with the cleaned scientific names with timeout
+    cat("Attempting DateLife with species:", paste(cleaned_scientific_list, collapse = ", "), "\n")
     
     # Implement timeout wrapper for DateLife to prevent hanging
     datelife_result <- tryCatch({
       # Set timeout (60 seconds for DateLife query)
       setTimeLimit(cpu = 60, elapsed = 60, transient = TRUE)
       
-      # Call DateLife
-      result <- get_datelife_result(input = scientific_list)
+      # Call DateLife with cleaned names
+      result <- get_datelife_result(input = cleaned_scientific_list)
       
       # Reset timeout
       setTimeLimit(cpu = Inf, elapsed = Inf, transient = FALSE)

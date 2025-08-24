@@ -13,6 +13,17 @@ library(dplyr)
 source("functions/rotl_tree_generation.R")
 source("functions/color_config.R")
 
+#' Clean scientific names by removing parenthetical addendums
+#' @param scientific_names Vector of scientific names
+#' @return Vector of cleaned scientific names
+clean_scientific_names <- function(scientific_names) {
+  # Remove parenthetical addendums like "(species in domain Eukaryota)"
+  # but preserve the main binomial name
+  cleaned <- gsub("\\s*\\([^)]+\\)\\s*$", "", scientific_names)
+  cleaned <- trimws(cleaned)  # Remove any trailing whitespace
+  return(cleaned)
+}
+
 # Calculate dynamic link length for hybrid trees with age information
 calculate_dynamic_link_length_hybrid <- function(network_data, base_length = 100, char_multiplier = 4) {
   # Get all node names (including age information in ancestor labels)
@@ -74,12 +85,22 @@ generate_hybrid_tree_html <- function(common_names, scientific_names) {
     
     # Step 2: Try to get DateLife age data for available species
     cat("Getting age data from DateLife...\n")
+    
+    # Clean scientific names to remove parenthetical addendums that can cause phylocom parsing issues
+    cleaned_scientific_names <- clean_scientific_names(scientific_names)
+    cat("Cleaned scientific names for DateLife query:\n")
+    for (i in seq_along(scientific_names)) {
+      if (scientific_names[i] != cleaned_scientific_names[i]) {
+        cat("  ", scientific_names[i], " -> ", cleaned_scientific_names[i], "\n")
+      }
+    }
+    
     datelife_result <- tryCatch({
       # Set timeout (90 seconds for hybrid tree DateLife query)
       setTimeLimit(cpu = 90, elapsed = 90, transient = TRUE)
       
-      # Call DateLife
-      result <- get_datelife_result(input = scientific_names, get_spp_from_taxon = FALSE, reference_taxonomy = 'opentree')
+      # Call DateLife with cleaned names
+      result <- get_datelife_result(input = cleaned_scientific_names, get_spp_from_taxon = FALSE, reference_taxonomy = 'opentree')
       
       # Reset timeout
       setTimeLimit(cpu = Inf, elapsed = Inf, transient = FALSE)
