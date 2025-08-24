@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Kill any existing phylocom processes that may be hanging
+pkill -f "phylocom bladj" 2>/dev/null || true
+
 # Generate random hybrid phylogenetic tree HTML using /api/full-tree-dated
 # Combines ROTL topology with DateLife ages where available
 # Usage: ./sh/generate_random_hybrid.sh [count] [output_file]

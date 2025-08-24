@@ -74,7 +74,29 @@ generate_hybrid_tree_html <- function(common_names, scientific_names) {
     
     # Step 2: Try to get DateLife age data for available species
     cat("Getting age data from DateLife...\n")
-    datelife_result <- get_datelife_result(input = scientific_names, get_spp_from_taxon = FALSE, reference_taxonomy = 'opentree')
+    datelife_result <- tryCatch({
+      # Set timeout (90 seconds for hybrid tree DateLife query)
+      setTimeLimit(cpu = 90, elapsed = 90, transient = TRUE)
+      
+      # Call DateLife
+      result <- get_datelife_result(input = scientific_names, get_spp_from_taxon = FALSE, reference_taxonomy = 'opentree')
+      
+      # Reset timeout
+      setTimeLimit(cpu = Inf, elapsed = Inf, transient = FALSE)
+      
+      result
+    }, error = function(e) {
+      # Reset timeout on error
+      setTimeLimit(cpu = Inf, elapsed = Inf, transient = FALSE)
+      
+      if (grepl("timeout|time limit", e$message)) {
+        cat("DateLife query timed out after 90 seconds, falling back to topology-only tree\n")
+        return(list())  # Return empty list to trigger topology-only fallback
+      } else {
+        cat("DateLife error:", e$message, "\n")
+        return(list())  # Return empty list for other errors too
+      }
+    })
     
     # Step 3: Create age mapping from DateLife data
     datelife_phylo <- NULL

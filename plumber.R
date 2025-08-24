@@ -421,10 +421,44 @@ function(req, common_names = NULL, scientific_names = NULL, allow_partial_respon
     library(datelife)
     library(ape)
     
-    # Try DateLife with the scientific names
+    # Try DateLife with the scientific names with timeout
     cat("Attempting DateLife with species:", paste(scientific_list, collapse = ", "), "\n")
     
-    datelife_result <- get_datelife_result(input = scientific_list)
+    # Implement timeout wrapper for DateLife to prevent hanging
+    datelife_result <- tryCatch({
+      # Set timeout (60 seconds for DateLife query)
+      setTimeLimit(cpu = 60, elapsed = 60, transient = TRUE)
+      
+      # Call DateLife
+      result <- get_datelife_result(input = scientific_list)
+      
+      # Reset timeout
+      setTimeLimit(cpu = Inf, elapsed = Inf, transient = FALSE)
+      
+      result
+    }, error = function(e) {
+      # Reset timeout on error
+      setTimeLimit(cpu = Inf, elapsed = Inf, transient = FALSE)
+      
+      if (grepl("timeout|time limit", e$message)) {
+        cat("DateLife query timed out after 60 seconds\n")
+        return(NULL)  # Return NULL to trigger timeout error response
+      } else {
+        stop(e)  # Re-throw other errors
+      }
+    })
+    
+    # Check if DateLife timed out
+    if (is.null(datelife_result)) {
+      return(list(
+        success = FALSE,
+        coverage = "timeout",
+        error = "DateLife query timed out after 60 seconds. This can happen with complex species combinations.",
+        input_common_names = common_list,
+        input_scientific_names = scientific_list,
+        note = "Try the regular /api/tree endpoint for topology-only trees or reduce the number of species"
+      ))
+    }
     
     if (length(datelife_result) == 0) {
       return(list(
