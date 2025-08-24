@@ -58,6 +58,82 @@ format_openapi_docs() {
     done
 }
 
+# Function to generate testing commands from OpenAPI spec
+generate_testing_commands() {
+    local json_data="$1"
+    local api_key="$2"
+    
+    echo "TESTING COMMANDS"
+    echo "================"
+    
+    # Generate commands for each endpoint
+    echo "$json_data" | jq -r '.paths | to_entries[] | .key as $path | .value | to_entries[] | .key as $method | .value as $endpoint_data | [$method | ascii_upcase, $path, ($endpoint_data.summary // $endpoint_data.description // "No description"), $endpoint_data] | @base64' | while read -r line; do
+        # Decode the base64 encoded JSON data
+        local decoded=$(echo "$line" | base64 --decode)
+        local method=$(echo "$decoded" | jq -r '.[0]')
+        local endpoint=$(echo "$decoded" | jq -r '.[1]')
+        local summary=$(echo "$decoded" | jq -r '.[2]')
+        local endpoint_data=$(echo "$decoded" | jq -r '.[3]')
+        
+        # Generate comment from summary
+        echo "# $summary"
+        
+        # Start building curl command
+        local curl_cmd="curl"
+        
+        # Add method if not GET
+        if [[ "$method" != "GET" ]]; then
+            curl_cmd="$curl_cmd -X $method"
+        fi
+        
+        # Add API key header unless it's health endpoint
+        if [[ "$endpoint" != "/api/health" ]]; then
+            curl_cmd="$curl_cmd -H \"X-API-Key: $api_key\""
+        fi
+        
+        # Handle request body parameters for POST endpoints
+        if [[ "$method" == "POST" ]]; then
+            local post_data=""
+            case "$endpoint" in
+                "/api/tree"|"/api/dated-tree"|"/api/full-tree-dated")
+                    post_data="common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis catus"
+                    ;;
+            esac
+            if [[ -n "$post_data" ]]; then
+                curl_cmd="$curl_cmd -d \"$post_data\""
+            fi
+        fi
+        
+        # Handle query parameters for GET endpoints
+        local query_params=""
+        case "$endpoint" in
+            "/api/echo")
+                query_params="?msg=hello"
+                ;;
+            "/api/species")
+                query_params="?search=whale&limit=5"
+                ;;
+            "/api/random-species"|"/api/random-tree"|"/api/debug-tree")
+                if [[ "$endpoint" == "/api/random-species" ]]; then
+                    query_params="?count=5"
+                else
+                    query_params="?count=3"
+                fi
+                ;;
+            "/api/citations")
+                # No query parameters needed for citations
+                query_params=""
+                ;;
+        esac
+        
+        # Complete the curl command
+        curl_cmd="$curl_cmd \"http://localhost:8000$endpoint$query_params\" | jq"
+        
+        echo "$curl_cmd"
+        echo
+    done
+}
+
 # Source .Renviron to get API keys
 if [ -f ".Renviron" ]; then
     export $(grep -v '^#' .Renviron | xargs)
@@ -109,34 +185,4 @@ else
 fi
 
 echo
-echo "TESTING COMMANDS"
-echo "================"
-echo "# Health check (no API key required)"
-echo "curl http://localhost:8000/api/health"
-echo
-echo "# Get legend information"
-echo "curl -H \"X-API-Key: $API_KEY\" \"http://localhost:8000/api/legend\""
-echo
-echo "# Echo test"
-echo "curl -H \"X-API-Key: $API_KEY\" \"http://localhost:8000/api/echo?msg=hello\""
-echo
-echo "# Search species"
-echo "curl -H \"X-API-Key: $API_KEY\" \"http://localhost:8000/api/species?search=whale&limit=5\""
-echo
-echo "# Generate topology tree (paired names required)"
-echo "curl -X POST -H \"X-API-Key: $API_KEY\" -d \"common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis catus\" http://localhost:8000/api/tree"
-echo
-echo "# Get random species"
-echo "curl -H \"X-API-Key: $API_KEY\" \"http://localhost:8000/api/random-species?count=5\""
-echo
-echo "# Generate random tree"
-echo "curl -H \"X-API-Key: $API_KEY\" \"http://localhost:8000/api/random-tree?count=3\""
-echo
-echo "# Generate dated tree (paired names required)"
-echo "curl -X POST -H \"X-API-Key: $API_KEY\" -d \"common_names=Human,Dog&scientific_names=Homo sapiens,Canis lupus\" http://localhost:8000/api/dated-tree"
-echo
-echo "# Generate full dated tree (experimental)"
-echo "curl -X POST -H \"X-API-Key: $API_KEY\" -d \"common_names=Human,Dog&scientific_names=Homo sapiens,Canis lupus\" http://localhost:8000/api/full-tree-dated"
-echo
-echo "# Debug tree generation"
-echo "curl -H \"X-API-Key: $API_KEY\" \"http://localhost:8000/api/debug-tree?count=3\""
+generate_testing_commands "$OPENAPI_JSON" "$API_KEY"
