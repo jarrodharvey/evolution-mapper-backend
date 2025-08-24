@@ -167,14 +167,14 @@ function() {
         label = "Evolutionary Ancestor", 
         color = "#3498DB",
         color_name = "Blue",
-        description = "Unnamed evolutionary ancestors"
+        description = "Unnamed evolutionary ancestors (ages shown where available in Mya)"
       ),
       list(
         node_type = "taxonomic",
         label = "Taxonomic Group",
         color = "#F39C12", 
         color_name = "Orange",
-        description = "Named taxonomic groups (families, orders, etc.)"
+        description = "Named taxonomic groups (families, orders, etc.) - ages shown where available in Mya"
       ),
       list(
         node_type = "species",

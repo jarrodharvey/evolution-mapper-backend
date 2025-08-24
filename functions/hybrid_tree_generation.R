@@ -137,14 +137,23 @@ generate_hybrid_tree_html <- function(common_names, scientific_names) {
     tree_html <- create_hybrid_tree_visualization(network_data)
     
     # Determine which species are missing age data (similar to /api/dated-tree)
-    species_without_ages_scientific <- setdiff(scientific_names, datelife_species)
+    # Need to normalize species names for comparison (DateLife uses underscores, input uses spaces)
+    datelife_species_normalized <- gsub("_", " ", datelife_species)
+    species_without_ages_scientific <- c()
     species_without_ages_common <- c()
     
-    # Map scientific names back to common names for missing species
-    for (sci_name in species_without_ages_scientific) {
-      match_idx <- which(scientific_names == sci_name)
-      if (length(match_idx) > 0) {
-        species_without_ages_common <- c(species_without_ages_common, common_names[match_idx[1]])
+    # Check each input species to see if it has age data
+    for (i in seq_along(scientific_names)) {
+      sci_name <- scientific_names[i]
+      common_name <- common_names[i]
+      
+      # Check if this species is in DateLife (normalize both formats for comparison)
+      has_datelife_data <- sci_name %in% datelife_species_normalized || 
+                          gsub(" ", "_", sci_name) %in% datelife_species
+      
+      if (!has_datelife_data) {
+        species_without_ages_scientific <- c(species_without_ages_scientific, sci_name)
+        species_without_ages_common <- c(species_without_ages_common, common_name)
       }
     }
     
@@ -320,11 +329,15 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
         if (age_result$has_age) {
           return(paste0(readable_name, " (", age_result$info, ")"))
         } else {
-          return(paste0(readable_name, " (", age_result$info, ")"))
+          return(readable_name)
         }
       } else {
         ancestor_label <- paste("Ancestor", LETTERS[min(internal_index, 26)])
-        return(paste0(ancestor_label, " (", age_result$info, ")"))
+        if (age_result$has_age) {
+          return(paste0(ancestor_label, " (", age_result$info, ")"))
+        } else {
+          return(ancestor_label)
+        }
       }
     }
   }
