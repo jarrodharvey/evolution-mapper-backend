@@ -84,8 +84,8 @@ if [[ -z "$SQLITE_OUTPUT" ]]; then
 fi
 
 # Parse the pipe-delimited output
-COMMON_LIST=""
-SCIENTIFIC_LIST=""
+COMMON_ARRAY=()
+SCIENTIFIC_ARRAY=()
 
 echo "✅ Selected species from database:"
 i=0
@@ -93,17 +93,16 @@ while IFS='|' read -r COMMON_NAME SCIENTIFIC_NAME; do
     if [[ -n "$COMMON_NAME" && -n "$SCIENTIFIC_NAME" ]]; then
         echo "   🧬 $COMMON_NAME ($SCIENTIFIC_NAME)"
         
-        # Add to lists
-        if [[ $i -eq 0 ]]; then
-            COMMON_LIST="$COMMON_NAME"
-            SCIENTIFIC_LIST="$SCIENTIFIC_NAME"
-        else
-            COMMON_LIST="$COMMON_LIST,$COMMON_NAME"
-            SCIENTIFIC_LIST="$SCIENTIFIC_LIST,$SCIENTIFIC_NAME"
-        fi
+        # Add to arrays
+        COMMON_ARRAY+=("$COMMON_NAME")
+        SCIENTIFIC_ARRAY+=("$SCIENTIFIC_NAME")
         ((i++))
     fi
 done <<< "$SQLITE_OUTPUT"
+
+# Convert arrays to JSON format
+COMMON_LIST=$(printf '%s\n' "${COMMON_ARRAY[@]}" | jq -R . | jq -s .)
+SCIENTIFIC_LIST=$(printf '%s\n' "${SCIENTIFIC_ARRAY[@]}" | jq -R . | jq -s .)
 
 if [[ -z "$SCIENTIFIC_LIST" ]]; then
     echo "❌ No valid species pairs found in database"
