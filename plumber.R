@@ -585,6 +585,54 @@ function(req, common_names = NULL, scientific_names = NULL) {
   return(result)
 }
 
+#* Get citations for all currently attached R packages
+#* @get /api/citations
+function() {
+  tryCatch({
+    # Get all currently attached packages
+    attached_packages <- sub("^package:", "", search()[grepl("^package:", search())])
+    
+    # Create a named list to store citations
+    citation_map <- list()
+    
+    # Iterate through each package and capture its citation as text
+    for (pkg in attached_packages) {
+      cit <- capture.output(print(citation(pkg), style = "text"))
+      cit_text <- paste(cit, collapse = "\n")
+      
+      # Use the citation text as key in the list
+      if (cit_text %in% names(citation_map)) {
+        citation_map[[cit_text]] <- c(citation_map[[cit_text]], pkg)
+      } else {
+        citation_map[[cit_text]] <- pkg
+      }
+    }
+    
+    # Convert to structured response format
+    citations_list <- list()
+    for (cit_text in names(citation_map)) {
+      packages <- citation_map[[cit_text]]
+      citations_list <- append(citations_list, list(list(
+        packages = packages,
+        citation = cit_text
+      )))
+    }
+    
+    return(list(
+      success = TRUE,
+      count = length(citations_list),
+      attached_packages = attached_packages,
+      citations = citations_list
+    ))
+    
+  }, error = function(e) {
+    return(list(
+      success = FALSE,
+      error = paste("Error retrieving citations:", conditionMessage(e))
+    ))
+  })
+}
+
 #* Debug endpoint - returns data structure instead of HTML tree
 #* @param count Number of species (2-7, default 3)
 #* @get /api/debug-tree
