@@ -152,38 +152,11 @@ function() {
 #* Get legend information for tree visualization colors
 #* @get /api/legend
 function() {
+  source("functions/color_config.R")
+  
   list(
     success = TRUE,
-    legend = list(
-      list(
-        node_type = "root",
-        label = "Root Ancestor",
-        color = "#E74C3C",
-        color_name = "Red",
-        description = "Common ancestor of all species in the tree"
-      ),
-      list(
-        node_type = "ancestor",
-        label = "Evolutionary Ancestor", 
-        color = "#3498DB",
-        color_name = "Blue",
-        description = "Unnamed evolutionary ancestors (ages shown where available in Mya)"
-      ),
-      list(
-        node_type = "taxonomic",
-        label = "Taxonomic Group",
-        color = "#F39C12", 
-        color_name = "Orange",
-        description = "Named taxonomic groups (families, orders, etc.) - ages shown where available in Mya"
-      ),
-      list(
-        node_type = "species",
-        label = "Species",
-        color = "#27AE60",
-        color_name = "Green", 
-        description = "Individual species (leaf nodes)"
-      )
-    )
+    legend = get_legend_data()
   )
 }
 

@@ -10,6 +10,8 @@ library(RSQLite)
 library(DBI)
 library(dplyr)
 
+source("functions/color_config.R")
+
 # Calculate dynamic link length based on label lengths
 calculate_dynamic_link_length <- function(network_data, base_length = 80, char_multiplier = 3) {
   # Get all node names
@@ -382,15 +384,9 @@ generate_tree_html <- function(species_names) {
       stringsAsFactors = FALSE
     )
     
-    # Add color mapping based on node type
+    # Add color mapping using centralized configuration
     tree_data$Color <- sapply(tree_data$NodeType, function(type) {
-      switch(type,
-        "root" = "#E74C3C",        # Red for root
-        "ancestor" = "#3498DB",     # Blue for ancestors  
-        "taxonomic" = "#F39C12",    # Orange for taxonomic groups
-        "species" = "#27AE60",      # Green for species
-        "#999999"                   # Default gray
-      )
+      get_node_color(type)
     })
     
     # Create collapsibleTree with proper color mapping
@@ -491,7 +487,7 @@ generate_tree_html_paired <- function(common_names, scientific_names) {
     # Add color mapping based on node type (same as ROTL approach)
     tree_data$Color <- sapply(tree_data$NodeType, function(type) {
       switch(type,
-        "root" = "#E74C3C",        # Red for root
+        "root" = "#8E44AD",        # Deep purple for root
         "ancestor" = "#3498DB",     # Blue for ancestors  
         "taxonomic" = "#F39C12",    # Orange for taxonomic groups
         "species" = "#27AE60",      # Green for species

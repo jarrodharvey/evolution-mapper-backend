@@ -9,6 +9,8 @@ library(DBI)
 library(dplyr)
 library(colorspace)
 
+source("functions/color_config.R")
+
 #' Function to get common names from scientific names using database
 #' @param scientific_names Vector of scientific names
 #' @return Named vector with scientific names as keys and common names as values
@@ -205,54 +207,38 @@ convert_phylo_to_network_with_ages <- function(phylo_tree, distance_matrix) {
 #' @return HTML string for CollapsibleTree
 create_collapsible_tree_from_network <- function(network_data) {
   
-  # Create age-based color mapping
+  # Create age-based color mapping using centralized configuration
   network_data$Color <- sapply(1:nrow(network_data), function(i) {
     node_type <- network_data$NodeType[i]
     node_age <- network_data$Age[i]
     
-    switch(node_type,
-      "root" = "#E74C3C",        # Red for root (same as rotl)
-      "species" = "#27AE60",     # Green for species (same as rotl)
-      "taxonomic" = {
-        # Age-based gradient for taxonomic nodes (orange to dark orange)
-        if (is.numeric(node_age) && node_age > 0) {
-          # Get all non-zero ages for scaling
-          all_ages <- network_data$Age[network_data$NodeType %in% c("taxonomic", "ancestor") & network_data$Age > 0]
-          if (length(all_ages) > 1) {
-            min_age <- min(all_ages, na.rm = TRUE)
-            max_age <- max(all_ages, na.rm = TRUE)
-            # Scale age to 0-1 range
-            age_scale <- (node_age - min_age) / (max_age - min_age)
-            # Create gradient from light orange to dark orange
-            rgb(1.0 - (age_scale * 0.3), 0.6 - (age_scale * 0.4), 0.07 - (age_scale * 0.05))
-          } else {
-            "#F39C12"  # Default orange
-          }
+    if (node_type %in% c("root", "species")) {
+      # Use base colors for root and species
+      get_node_color(node_type)
+    } else if (node_type %in% c("taxonomic", "ancestor")) {
+      # Use gradient colors for taxonomic and ancestor nodes
+      if (is.numeric(node_age) && node_age > 0) {
+        # Get all non-zero ages for scaling
+        all_ages <- network_data$Age[network_data$NodeType %in% c("taxonomic", "ancestor") & network_data$Age > 0]
+        if (length(all_ages) > 1) {
+          min_age <- min(all_ages, na.rm = TRUE)
+          max_age <- max(all_ages, na.rm = TRUE)
+          # Scale age to 0-1 range
+          age_scale <- (node_age - min_age) / (max_age - min_age)
+          # Use centralized gradient function
+          get_gradient_color(node_type, age_scale)
         } else {
-          "#F39C12"  # Default orange for zero/invalid ages
+          # Fallback to base color
+          get_node_color(node_type)
         }
-      },
-      "ancestor" = {
-        # Age-based gradient for ancestor nodes (blue to dark blue)
-        if (is.numeric(node_age) && node_age > 0) {
-          # Get all non-zero ages for scaling
-          all_ages <- network_data$Age[network_data$NodeType %in% c("taxonomic", "ancestor") & network_data$Age > 0]
-          if (length(all_ages) > 1) {
-            min_age <- min(all_ages, na.rm = TRUE)
-            max_age <- max(all_ages, na.rm = TRUE)
-            # Scale age to 0-1 range
-            age_scale <- (node_age - min_age) / (max_age - min_age)
-            # Create gradient from light blue to dark blue
-            rgb(0.2 - (age_scale * 0.1), 0.6 - (age_scale * 0.3), 0.9 - (age_scale * 0.3))
-          } else {
-            "#3498DB"  # Default blue
-          }
-        } else {
-          "#3498DB"  # Default blue for zero/invalid ages
-        }
-      },
-      "#999999"  # Default gray
-    )
+      } else {
+        # Fallback to base color for zero/invalid ages
+        get_node_color(node_type)
+      }
+    } else {
+      # Default fallback
+      get_node_color("default")
+    }
   })
   
   # Prepare data for collapsibleTreeNetwork (needs specific column names)

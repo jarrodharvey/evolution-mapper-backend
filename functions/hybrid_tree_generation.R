@@ -11,6 +11,7 @@ library(DBI)
 library(dplyr)
 
 source("functions/rotl_tree_generation.R")
+source("functions/color_config.R")
 
 # Calculate dynamic link length for hybrid trees with age information
 calculate_dynamic_link_length_hybrid <- function(network_data, base_length = 100, char_multiplier = 4) {
@@ -448,36 +449,12 @@ create_hybrid_tree_visualization <- function(network_data) {
     stringsAsFactors = FALSE
   )
   
-  # Add color mapping - differentiate between nodes with/without age data
+  # Add color mapping using centralized color configuration
   tree_data$Color <- sapply(1:nrow(tree_data), function(i) {
     node_type <- tree_data$NodeType[i]
     has_age <- tree_data$HasAge[i]
     
-    switch(node_type,
-      "root" = "#E74C3C",        # Red for root
-      "species" = {
-        if (has_age) {
-          "#27AE60"              # Green for species with age data
-        } else {
-          "#95A5A6"              # Gray for species without age data
-        }
-      },
-      "taxonomic" = {
-        if (has_age) {
-          "#F39C12"              # Orange for taxonomic nodes with age data
-        } else {
-          "#D35400"              # Dark orange for taxonomic nodes without age data
-        }
-      },
-      "ancestor" = {
-        if (has_age) {
-          "#3498DB"              # Blue for ancestors with age data
-        } else {
-          "#2C3E50"              # Dark blue for ancestors without age data
-        }
-      },
-      "#999999"                  # Default gray
-    )
+    get_node_color(node_type, has_age)
   })
   
   # Create collapsibleTree with color mapping

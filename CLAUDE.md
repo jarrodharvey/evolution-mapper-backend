@@ -173,7 +173,7 @@ curl -X POST -H "X-API-Key: YOUR-API-Key" -d "species=Homo sapiens,Canis lupus,F
 3. rotl library fetches phylogenetic tree from Open Tree of Life  
 4. Tree converted to hierarchical structure preserving user-provided common names
 5. CollapsibleTree generates interactive HTML visualization
-6. Color-coded nodes: Red (root), Blue (unnamed ancestors), Orange (taxonomic groups), Green (species)
+6. Color-coded nodes: Deep Purple (root), Blue (unnamed ancestors), Orange (taxonomic groups), Green (species)
 
 **Dated Trees (/api/dated-tree):**
 1. API receives paired species lists (common + scientific names)
@@ -204,7 +204,7 @@ CREATE TABLE species (
 All endpoints return JSON with `success` boolean and either `error` message or relevant data fields.
 
 ### Color Coding System
-- **Red (#E74C3C)**: Root node ("Common ancestor - click me!")
+- **Deep Purple (#8E44AD)**: Root node ("Common ancestor - click me!")
 - **Blue (#3498DB)**: Unnamed evolutionary ancestors  
 - **Orange (#F39C12)**: Named taxonomic groups (families, orders, etc.)
 - **Green (#27AE60)**: Species (leaf nodes)
