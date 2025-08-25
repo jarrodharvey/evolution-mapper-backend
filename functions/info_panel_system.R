@@ -2,7 +2,7 @@
 # Replaces tooltips with clickable info icons and expandable panels
 # Mobile-friendly alternative to hover-based tooltips
 
-source("functions/age_tooltips.R")
+
 
 # Generate info panel HTML for ancestor nodes
 generate_info_panel_html <- function(node_data) {
@@ -19,15 +19,7 @@ generate_info_panel_html <- function(node_data) {
     return("")  # No info panel for species
   }
   
-  # Get the tooltip content but without HTML formatting
-  tooltip_content <- generate_age_tooltip(node_data)
   
-  # Convert HTML tooltip to plain text content for the panel
-  panel_content <- gsub("<br>", "\n", tooltip_content)
-  panel_content <- gsub("<strong>([^<]*)</strong>", "\\1", panel_content)
-  panel_content <- gsub("<em>([^<]*)</em>", "\\1", panel_content)
-  panel_content <- gsub("<small>([^<]*)</small>", "\\1", panel_content)
-  panel_content <- gsub("<[^>]*>", "", panel_content)  # Remove any remaining HTML tags
   
   # Create info icon and panel structure
   info_panel_html <- paste0(
