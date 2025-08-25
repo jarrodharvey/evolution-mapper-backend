@@ -11,6 +11,7 @@ library(DBI)
 library(dplyr)
 
 source("functions/color_config.R")
+source("functions/tree_html_enhancement.R")
 
 # Calculate dynamic link length based on label lengths
 calculate_dynamic_link_length <- function(network_data, base_length = 80, char_multiplier = 3) {
@@ -389,6 +390,9 @@ generate_tree_html <- function(species_names) {
       get_node_color(type)
     })
     
+    # Add info panel data to tree_data
+    tree_data <- add_info_panel_data(tree_data, network_data)
+    
     # Create collapsibleTree with proper color mapping
     tree_widget <- collapsibleTreeNetwork(
       tree_data,
@@ -402,74 +406,8 @@ generate_tree_html <- function(species_names) {
       zoomable = TRUE
     )
     
-    # Convert to HTML using temporary file approach
-    temp_file <- tempfile(fileext = ".html")
-    htmlwidgets::saveWidget(tree_widget, temp_file, selfcontained = TRUE)
-    tree_html <- paste(readLines(temp_file), collapse = "\n")
-    unlink(temp_file)  # Clean up temp file
-    
-    # Remove white bar by adding comprehensive CSS to override all spacing
-    custom_css <- "<style>body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; } html { margin: 0 !important; padding: 0 !important; } #htmlwidget_container { margin: 0 !important; padding: 0 !important; }</style>"
-    tree_html <- gsub("</head>", paste0(custom_css, "</head>"), tree_html)
-    
-    # Replace collapsibleTree tooltip with custom cross-browser implementation using event delegation
-    firefox_fix_script <- '<script>
-    // Custom tooltip implementation that works across browsers with event delegation
-    setTimeout(function() {
-      // Remove existing tooltips
-      d3.selectAll(".tooltip").remove();
-      
-      // Create our own tooltip div
-      var customTooltip = d3.select("body")
-        .append("div")
-        .attr("class", "custom-tooltip")
-        .style("position", "absolute")
-        .style("padding", "8px")
-        .style("background", "rgba(0, 0, 0, 0.8)")
-        .style("color", "white")
-        .style("border-radius", "4px")
-        .style("font-size", "14px")
-        .style("pointer-events", "none")
-        .style("opacity", 0)
-        .style("z-index", 1000);
-      
-      // Use event delegation on the SVG container to handle dynamically created nodes
-      d3.select(".collapsibleTree")
-        .on("mouseover", function() {
-          var target = d3.event.target;
-          // Check if we are hovering over a node or its children
-          var nodeElement = target.closest(".node") || (target.tagName === "g" && target.classList.contains("node") ? target : null);
-          
-          if (nodeElement) {
-            // Get the D3 data bound to this node
-            var nodeData = d3.select(nodeElement).datum();
-            if (nodeData && nodeData.data) {
-              var rect = nodeElement.getBoundingClientRect();
-              var scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
-              var scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-              
-              customTooltip
-                .style("opacity", 0.9)
-                .html(nodeData.data.tooltip || nodeData.data.name)
-                .style("left", (rect.right + scrollLeft + 10) + "px")
-                .style("top", (rect.top + scrollTop) + "px");
-            }
-          }
-        })
-        .on("mouseout", function() {
-          var target = d3.event.target;
-          var nodeElement = target.closest(".node") || (target.tagName === "g" && target.classList.contains("node") ? target : null);
-          
-          if (nodeElement) {
-            customTooltip.style("opacity", 0);
-          }
-        });
-      
-      // Also disable the original tooltip functionality
-      d3.selectAll(".collapsibleTree .node").on("mouseover.tooltip", null).on("mouseout.tooltip", null);
-    }, 1000);
-    </script>'
-    tree_html <- gsub("</body>", paste0(firefox_fix_script, "</body>"), tree_html)
+    # Convert to HTML and enhance with info panel system
+    tree_html <- create_enhanced_tree_html(tree_data, network_data, tree_widget)
     
     return(list(
       success = TRUE,
@@ -543,16 +481,13 @@ generate_tree_html_paired <- function(common_names, scientific_names) {
       stringsAsFactors = FALSE
     )
     
-    # Add color mapping based on node type (same as ROTL approach)
+    # Add color mapping using centralized configuration
     tree_data$Color <- sapply(tree_data$NodeType, function(type) {
-      switch(type,
-        "root" = "#8E44AD",        # Deep purple for root
-        "ancestor" = "#3498DB",     # Blue for ancestors  
-        "taxonomic" = "#F39C12",    # Orange for taxonomic groups
-        "species" = "#27AE60",      # Green for species
-        "#999999"                   # Default gray
-      )
+      get_node_color(type)
     })
+    
+    # Add info panel data to tree_data
+    tree_data <- add_info_panel_data(tree_data, network_data)
     
     # Create collapsibleTree with proper color mapping
     tree_widget <- collapsibleTreeNetwork(
@@ -567,74 +502,8 @@ generate_tree_html_paired <- function(common_names, scientific_names) {
       zoomable = TRUE
     )
     
-    # Convert to HTML using temporary file approach
-    temp_file <- tempfile(fileext = ".html")
-    htmlwidgets::saveWidget(tree_widget, temp_file, selfcontained = TRUE)
-    tree_html <- paste(readLines(temp_file), collapse = "\n")
-    unlink(temp_file)  # Clean up temp file
-    
-    # Remove white bar by adding comprehensive CSS to override all spacing
-    custom_css <- "<style>body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; } html { margin: 0 !important; padding: 0 !important; } #htmlwidget_container { margin: 0 !important; padding: 0 !important; }</style>"
-    tree_html <- gsub("</head>", paste0(custom_css, "</head>"), tree_html)
-    
-    # Replace collapsibleTree tooltip with custom cross-browser implementation using event delegation
-    firefox_fix_script <- '<script>
-    // Custom tooltip implementation that works across browsers with event delegation
-    setTimeout(function() {
-      // Remove existing tooltips
-      d3.selectAll(".tooltip").remove();
-      
-      // Create our own tooltip div
-      var customTooltip = d3.select("body")
-        .append("div")
-        .attr("class", "custom-tooltip")
-        .style("position", "absolute")
-        .style("padding", "8px")
-        .style("background", "rgba(0, 0, 0, 0.8)")
-        .style("color", "white")
-        .style("border-radius", "4px")
-        .style("font-size", "14px")
-        .style("pointer-events", "none")
-        .style("opacity", 0)
-        .style("z-index", 1000);
-      
-      // Use event delegation on the SVG container to handle dynamically created nodes
-      d3.select(".collapsibleTree")
-        .on("mouseover", function() {
-          var target = d3.event.target;
-          // Check if we are hovering over a node or its children
-          var nodeElement = target.closest(".node") || (target.tagName === "g" && target.classList.contains("node") ? target : null);
-          
-          if (nodeElement) {
-            // Get the D3 data bound to this node
-            var nodeData = d3.select(nodeElement).datum();
-            if (nodeData && nodeData.data) {
-              var rect = nodeElement.getBoundingClientRect();
-              var scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
-              var scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-              
-              customTooltip
-                .style("opacity", 0.9)
-                .html(nodeData.data.tooltip || nodeData.data.name)
-                .style("left", (rect.right + scrollLeft + 10) + "px")
-                .style("top", (rect.top + scrollTop) + "px");
-            }
-          }
-        })
-        .on("mouseout", function() {
-          var target = d3.event.target;
-          var nodeElement = target.closest(".node") || (target.tagName === "g" && target.classList.contains("node") ? target : null);
-          
-          if (nodeElement) {
-            customTooltip.style("opacity", 0);
-          }
-        });
-      
-      // Also disable the original tooltip functionality
-      d3.selectAll(".collapsibleTree .node").on("mouseover.tooltip", null).on("mouseout.tooltip", null);
-    }, 1000);
-    </script>'
-    tree_html <- gsub("</body>", paste0(firefox_fix_script, "</body>"), tree_html)
+    # Convert to HTML and enhance with info panel system
+    tree_html <- create_enhanced_tree_html(tree_data, network_data, tree_widget)
     
     return(list(
       success = TRUE,
