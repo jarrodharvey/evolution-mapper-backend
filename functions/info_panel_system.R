@@ -6,8 +6,11 @@
 
 # Generate info panel HTML for ancestor nodes
 generate_info_panel_html <- function(node_data) {
+  # Handle both naming conventions: "to" (ROTL) and "Child" (DateLife)
   node_name <- if (is.list(node_data) && "to" %in% names(node_data)) {
     node_data$to
+  } else if (is.list(node_data) && "Child" %in% names(node_data)) {
+    node_data$Child
   } else if (is.character(node_data)) {
     node_data
   } else {
@@ -39,8 +42,11 @@ generate_info_panel_html <- function(node_data) {
 
 # Format the panel content with proper structure
 format_panel_content <- function(node_data) {
+  # Handle both naming conventions: "to" (ROTL) and "Child" (DateLife)
   node_name <- if (is.list(node_data) && "to" %in% names(node_data)) {
     node_data$to
+  } else if (is.list(node_data) && "Child" %in% names(node_data)) {
+    node_data$Child
   } else if (is.character(node_data)) {
     node_data
   } else {
@@ -371,7 +377,8 @@ console.log("Info panel system initialized");
 
 # Create info panel data for network
 create_info_panel_data <- function(network_data) {
-  if (!"to" %in% names(network_data)) {
+  # Handle both naming conventions: "to" (ROTL) and "Child" (DateLife)
+  if (!("to" %in% names(network_data)) && !("Child" %in% names(network_data))) {
     return(rep("", nrow(network_data)))
   }
   
@@ -390,6 +397,60 @@ create_info_panel_data <- function(network_data) {
   }
   
   return(info_panel_data)
+}
+
+# Helper functions for age information formatting
+
+#' Get confidence stars based on age source
+#' @param age_source The source of age data
+#' @return String with star ratings
+get_confidence_stars <- function(age_source) {
+  if (is.null(age_source) || is.na(age_source)) {
+    return("★☆☆☆ (No source)")
+  }
+  
+  # Different confidence levels based on source
+  if (grepl("DateLife chronogram database", age_source, ignore.case = TRUE)) {
+    return("★★★☆ (Chronogram database)")
+  } else if (grepl("molecular clock", age_source, ignore.case = TRUE)) {
+    return("★★★★ (Molecular clock)")
+  } else {
+    return("★★☆☆ (Other source)")
+  }
+}
+
+#' Format age source text for display
+#' @param age_source The source of age data
+#' @return Formatted source text
+format_age_source <- function(age_source) {
+  if (is.null(age_source) || is.na(age_source)) {
+    return("Source: Unknown")
+  }
+  return(paste("Source:", age_source))
+}
+
+#' Get geological period for a given age
+#' @param age_mya Age in millions of years ago
+#' @return Geological period name or NULL
+get_geological_period <- function(age_mya) {
+  if (is.null(age_mya) || is.na(age_mya) || age_mya <= 0) {
+    return(NULL)
+  }
+  
+  # Major geological periods (simplified)
+  if (age_mya <= 2.6) return("Quaternary")
+  if (age_mya <= 23) return("Neogene")
+  if (age_mya <= 66) return("Paleogene")
+  if (age_mya <= 145) return("Cretaceous")
+  if (age_mya <= 201) return("Jurassic")
+  if (age_mya <= 252) return("Triassic")
+  if (age_mya <= 299) return("Permian")
+  if (age_mya <= 359) return("Carboniferous")
+  if (age_mya <= 419) return("Devonian")
+  if (age_mya <= 444) return("Silurian")
+  if (age_mya <= 485) return("Ordovician")
+  if (age_mya <= 541) return("Cambrian")
+  return("Precambrian")
 }
 
 cat("Info panel system functions loaded successfully\n")

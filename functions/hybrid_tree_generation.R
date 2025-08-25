@@ -475,6 +475,45 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
   return(network_data)
 }
 
+#' Transform hybrid network data to info panel format
+#' @param network_data Hybrid network data with AgeInfo and HasAge fields
+#' @return Network data compatible with info panel system
+transform_hybrid_to_info_panel_format <- function(network_data) {
+  # Transform hybrid data structure to info panel format
+  # Convert from: from/to, AgeInfo, HasAge
+  # Convert to: to/Child, Age, AgeValid, AgeSource, ValidationNotes
+  
+  info_panel_data <- data.frame(
+    to = network_data$to,
+    NodeType = network_data$NodeType,
+    stringsAsFactors = FALSE
+  )
+  
+  # Extract age from AgeInfo and convert to numeric
+  info_panel_data$Age <- sapply(network_data$AgeInfo, function(age_info) {
+    if (is.na(age_info) || age_info == "age unavailable") {
+      return(NA_real_)
+    }
+    # Extract numeric value from strings like "65.2 Mya" or "~65.2 Mya"
+    age_match <- regmatches(age_info, regexpr("\\d+\\.?\\d*", age_info))
+    if (length(age_match) > 0) {
+      return(as.numeric(age_match[1]))
+    }
+    return(NA_real_)
+  })
+  
+  # Set validation fields based on HasAge
+  info_panel_data$AgeValid <- network_data$HasAge
+  info_panel_data$AgeSource <- ifelse(network_data$HasAge, 
+                                      "DateLife chronogram database (hybrid tree)",
+                                      "Age data unavailable")
+  info_panel_data$ValidationNotes <- ifelse(network_data$HasAge,
+                                            NA_character_,
+                                            "Some species lack chronogram coverage")
+  
+  return(info_panel_data)
+}
+
 #' Create CollapsibleTree visualization for hybrid tree
 #' @param network_data Network data frame with age information
 #' @return HTML string for CollapsibleTree
@@ -513,74 +552,15 @@ create_hybrid_tree_visualization <- function(network_data) {
     zoomable = TRUE
   )
   
-  # Convert to HTML
-  temp_file <- tempfile(fileext = ".html")
-  htmlwidgets::saveWidget(tree_widget, temp_file, selfcontained = TRUE)
-  tree_html <- paste(readLines(temp_file), collapse = "\n")
-  unlink(temp_file)
+  # Transform network data to info panel format
+  info_panel_network_data <- transform_hybrid_to_info_panel_format(network_data)
   
-  # Remove white bar
-  custom_css <- "<style>body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; } html { margin: 0 !important; padding: 0 !important; } #htmlwidget_container { margin: 0 !important; padding: 0 !important; }</style>"
-  tree_html <- gsub("</head>", paste0(custom_css, "</head>"), tree_html)
+  # Add info panel data to tree_data
+  tree_data <- add_info_panel_data(tree_data, info_panel_network_data)
   
-  # Replace collapsibleTree tooltip with custom cross-browser implementation using event delegation
-  firefox_fix_script <- '<script>
-  // Custom tooltip implementation that works across browsers with event delegation
-  setTimeout(function() {
-    // Remove existing tooltips
-    d3.selectAll(".tooltip").remove();
-    
-    // Create our own tooltip div
-    var customTooltip = d3.select("body")
-      .append("div")
-      .attr("class", "custom-tooltip")
-      .style("position", "absolute")
-      .style("padding", "8px")
-      .style("background", "rgba(0, 0, 0, 0.8)")
-      .style("color", "white")
-      .style("border-radius", "4px")
-      .style("font-size", "14px")
-      .style("pointer-events", "none")
-      .style("opacity", 0)
-      .style("z-index", 1000);
-    
-    // Use event delegation on the SVG container to handle dynamically created nodes
-    d3.select(".collapsibleTree")
-      .on("mouseover", function() {
-        var target = d3.event.target;
-        // Check if we are hovering over a node or its children
-        var nodeElement = target.closest(".node") || (target.tagName === "g" && target.classList.contains("node") ? target : null);
-        
-        if (nodeElement) {
-          // Get the D3 data bound to this node
-          var nodeData = d3.select(nodeElement).datum();
-          if (nodeData && nodeData.data) {
-            var rect = nodeElement.getBoundingClientRect();
-            var scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
-            var scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-            
-            customTooltip
-              .style("opacity", 0.9)
-              .html(nodeData.data.tooltip || nodeData.data.name)
-              .style("left", (rect.right + scrollLeft + 10) + "px")
-              .style("top", (rect.top + scrollTop) + "px");
-          }
-        }
-      })
-      .on("mouseout", function() {
-        var target = d3.event.target;
-        var nodeElement = target.closest(".node") || (target.tagName === "g" && target.classList.contains("node") ? target : null);
-        
-        if (nodeElement) {
-          customTooltip.style("opacity", 0);
-        }
-      });
-    
-    // Also disable the original tooltip functionality
-    d3.selectAll(".collapsibleTree .node").on("mouseover.tooltip", null).on("mouseout.tooltip", null);
-  }, 1000);
-  </script>'
-  tree_html <- gsub("</body>", paste0(firefox_fix_script, "</body>"), tree_html)
+  # Use enhanced tree HTML generation with info panels
+  tree_html <- create_enhanced_tree_html(tree_data, info_panel_network_data, tree_widget)
+  
   
   return(tree_html)
 }

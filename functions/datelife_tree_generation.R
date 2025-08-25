@@ -94,12 +94,15 @@ convert_phylo_to_network_with_ages <- function(phylo_tree, distance_matrix) {
   
   n_tips <- length(phylo_tree$tip.label)
   
-  # Create network data frame directly from phylo edges
+  # Create network data frame directly from phylo edges with info panel fields
   network_data <- data.frame(
     Parent = character(0),
     Child = character(0),
     Age = numeric(0),
     NodeType = character(0),
+    AgeValid = logical(0),
+    AgeSource = character(0),
+    ValidationNotes = character(0),
     stringsAsFactors = FALSE
   )
   
@@ -167,12 +170,15 @@ convert_phylo_to_network_with_ages <- function(phylo_tree, distance_matrix) {
     parent_type <- get_node_type(parent_num)
     child_type <- get_node_type(child_num)
     
-    # Add edge to network
+    # Add edge to network with info panel fields
     network_data <- rbind(network_data, data.frame(
       Parent = parent_label,
       Child = child_label,
       Age = child_age_val,
       NodeType = child_type,
+      AgeValid = !is.na(child_age_val) && child_age_val > 0,
+      AgeSource = "DateLife chronogram database",
+      ValidationNotes = if (!is.na(child_age_val) && child_age_val > 0) NA_character_ else "Age data not available from chronogram",
       stringsAsFactors = FALSE
     ))
   }
@@ -190,12 +196,18 @@ convert_phylo_to_network_with_ages <- function(phylo_tree, distance_matrix) {
       Child = root_label,
       Age = root_age,
       NodeType = "root",
+      AgeValid = !is.na(root_age) && root_age > 0,
+      AgeSource = "DateLife chronogram database",
+      ValidationNotes = if (!is.na(root_age) && root_age > 0) NA_character_ else "Root age data not available",
       stringsAsFactors = FALSE
     ), data.frame(
       Parent = root_label,
       Child = root_nodes[1],
       Age = root_age,
       NodeType = "ancestor",
+      AgeValid = !is.na(root_age) && root_age > 0,
+      AgeSource = "DateLife chronogram database",
+      ValidationNotes = if (!is.na(root_age) && root_age > 0) NA_character_ else "Age data not available from chronogram",
       stringsAsFactors = FALSE
     ), network_data)
   }
@@ -204,7 +216,7 @@ convert_phylo_to_network_with_ages <- function(phylo_tree, distance_matrix) {
 }
 
 #' Create CollapsibleTree HTML directly from network data with age-based colors
-#' @param network_data Data frame with Parent, Child, Age, NodeType columns
+#' @param network_data Data frame with Parent, Child, Age, NodeType, AgeValid, AgeSource, ValidationNotes columns
 #' @return HTML string for CollapsibleTree
 create_collapsible_tree_from_network <- function(network_data) {
   
@@ -359,12 +371,15 @@ convert_phylo_to_network_with_ages_paired <- function(phylo_tree, distance_matri
   
   n_tips <- length(phylo_tree$tip.label)
   
-  # Create network data frame directly from phylo edges
+  # Create network data frame directly from phylo edges with info panel fields
   network_data <- data.frame(
     Parent = character(0),
     Child = character(0),
     Age = numeric(0),
     NodeType = character(0),
+    AgeValid = logical(0),
+    AgeSource = character(0),
+    ValidationNotes = character(0),
     stringsAsFactors = FALSE
   )
   
@@ -432,12 +447,15 @@ convert_phylo_to_network_with_ages_paired <- function(phylo_tree, distance_matri
     parent_type <- get_node_type(parent_num)
     child_type <- get_node_type(child_num)
     
-    # Add edge to network
+    # Add edge to network with info panel fields
     network_data <- rbind(network_data, data.frame(
       Parent = parent_label,
       Child = child_label,
       Age = child_age_val,
       NodeType = child_type,
+      AgeValid = !is.na(child_age_val) && child_age_val > 0,
+      AgeSource = "DateLife chronogram database",
+      ValidationNotes = if (!is.na(child_age_val) && child_age_val > 0) NA_character_ else "Age data not available from chronogram",
       stringsAsFactors = FALSE
     ))
   }
@@ -455,12 +473,18 @@ convert_phylo_to_network_with_ages_paired <- function(phylo_tree, distance_matri
       Child = root_label,
       Age = root_age,
       NodeType = "root",
+      AgeValid = !is.na(root_age) && root_age > 0,
+      AgeSource = "DateLife chronogram database",
+      ValidationNotes = if (!is.na(root_age) && root_age > 0) NA_character_ else "Root age data not available",
       stringsAsFactors = FALSE
     ), data.frame(
       Parent = root_label,
       Child = root_nodes[1],
       Age = root_age,
       NodeType = "ancestor",
+      AgeValid = !is.na(root_age) && root_age > 0,
+      AgeSource = "DateLife chronogram database",
+      ValidationNotes = if (!is.na(root_age) && root_age > 0) NA_character_ else "Age data not available from chronogram",
       stringsAsFactors = FALSE
     ), network_data)
   }
