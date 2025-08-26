@@ -15,7 +15,7 @@ pr("plumber.R") %>% pr_run(port = 8000)
 **R Packages:**
 ```r
 install.packages(c("plumber", "rlang", "rotl", "ape", "collapsibleTree", 
-                   "htmlwidgets", "RSQLite", "DBI", "dplyr", "datelife"))
+                   "htmlwidgets", "RSQLite", "DBI", "dplyr", "datelife", "httr"))
 ```
 
 **System Dependencies (for production):**
@@ -50,6 +50,12 @@ curl -H "X-API-Key: YOUR-API-KEY" "http://localhost:8000/api/random-tree?count=3
 
 # Get legend information for tree colors
 curl -H "X-API-Key: YOUR-API-KEY" "http://localhost:8000/api/legend"
+
+# Get Wikipedia information for taxonomic groups
+curl -H "X-API-Key: YOUR-API-KEY" "http://localhost:8000/api/wikipedia_truncated_intro?taxonomic_group=Mammalia"
+
+# Get Wikipedia info with custom truncation length
+curl -H "X-API-Key: YOUR-API-KEY" "http://localhost:8000/api/wikipedia_truncated_intro?taxonomic_group=Primates&truncate_length=200"
 ```
 
 ### API Key Configuration
@@ -124,6 +130,7 @@ lint("functions/tree_generation.R")
 - **POST /api/dated-tree**: Generate dated phylogenetic tree with chronogram ages (common + scientific names required, limited coverage)
 - **GET /api/random-tree?count=N**: Generate random tree for testing (topology only)
 - **GET /api/legend**: Get legend information for tree visualization colors and node types
+- **GET /api/wikipedia_truncated_intro?taxonomic_group=name&truncate_length=N**: Get truncated Wikipedia introduction for taxonomic groups
 - **GET /api/health**: Health check endpoint
 
 ### New Dated Tree API (/api/dated-tree)
@@ -208,6 +215,35 @@ All endpoints return JSON with `success` boolean and either `error` message or r
 - **Blue (#3498DB)**: Unnamed evolutionary ancestors  
 - **Orange (#F39C12)**: Named taxonomic groups (families, orders, etc.)
 - **Green (#27AE60)**: Species (leaf nodes)
+
+### Wikipedia API Documentation
+**NEW ENDPOINT**: `/api/wikipedia_truncated_intro` provides Wikipedia article introductions for taxonomic groups.
+
+**Purpose**: Gives frontend applications contextual information about ancestral taxonomic groups in phylogenetic trees.
+
+**Parameters:**
+- `taxonomic_group` (required): Name of the taxonomic group (e.g., "Mammalia", "Primates", "Canidae")
+- `truncate_length` (optional): Maximum introduction length in characters (50-1000, default 300)
+
+**Features:**
+- Searches Wikipedia using REST API for accurate article matching
+- Intelligent text truncation at sentence boundaries when possible
+- Returns Wikipedia URL for full article access
+- Handles both scientific and common taxonomic names
+- Comprehensive error handling for missing articles
+
+**Response Format:**
+- **Success**: `taxonomic_group`, `wikipedia_title`, `introduction`, `url`, `page_id`, `truncated`
+- **Error**: `success: false`, `error` message, `taxonomic_group`
+
+**Example Usage:**
+```bash
+# Basic usage
+curl -H "X-API-Key: YOUR-API-KEY" "http://localhost:8000/api/wikipedia_truncated_intro?taxonomic_group=Mammalia"
+
+# With custom length
+curl -H "X-API-Key: YOUR-API-KEY" "http://localhost:8000/api/wikipedia_truncated_intro?taxonomic_group=Primates&truncate_length=200"
+```
 
 ### DateLife Coverage Limitations
 **IMPORTANT**: DateLife has extremely limited coverage in the current chronogram database:

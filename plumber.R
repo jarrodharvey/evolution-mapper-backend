@@ -32,11 +32,13 @@ function(req, res) {
 source("functions/rotl_tree_generation.R")
 source("functions/datelife_tree_generation.R")
 source("functions/hybrid_tree_generation.R")
+source("functions/wikipedia_api.R")
 
 # Required libraries
 library(DBI)
 library(RSQLite)
 library(jsonlite)
+library(httr)
 
 # Shared function for parsing species input (used by both APIs)
 parse_species_input <- function(input) {
@@ -607,6 +609,36 @@ function(req, common_names = NULL, scientific_names = NULL) {
   }
   
   result <- generate_hybrid_tree_html(common_list, scientific_list)
+  return(result)
+}
+
+#* Get truncated Wikipedia introduction for taxonomic group
+#* @param taxonomic_group The taxonomic group name to look up on Wikipedia
+#* @param truncate_length Optional maximum length of introduction (default 300)
+#* @get /api/wikipedia_truncated_intro
+function(taxonomic_group = NULL, truncate_length = 300) {
+  if (is.null(taxonomic_group) || taxonomic_group == "") {
+    return(list(
+      success = FALSE,
+      error = "Missing required parameter 'taxonomic_group'",
+      note = "Provide the name of a taxonomic group (e.g., 'Mammalia', 'Primates', 'Canidae')"
+    ))
+  }
+  
+  # Validate and sanitize truncate_length parameter
+  if (!is.null(truncate_length)) {
+    truncate_length <- as.numeric(truncate_length)
+    if (is.na(truncate_length) || truncate_length < 50) {
+      truncate_length <- 300  # Default fallback
+    } else if (truncate_length > 1000) {
+      truncate_length <- 1000  # Maximum limit to prevent abuse
+    }
+  } else {
+    truncate_length <- 300
+  }
+  
+  # Call Wikipedia API function
+  result <- get_wikipedia_intro(taxonomic_group, truncate_length)
   return(result)
 }
 
