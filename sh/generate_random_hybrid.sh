@@ -52,6 +52,8 @@ if curl -s --connect-timeout 5 --max-time 10 "http://localhost:8000/api/health" 
         echo "✅ Server is running and healthy"
     else
         echo "⚠️ Server responded but status unclear: $SERVER_STATUS"
+        echo "❌ Health check failed - exiting"
+        exit 1
     fi
 else
     echo "❌ Server is not responding on http://localhost:8000"

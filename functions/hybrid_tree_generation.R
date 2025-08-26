@@ -96,22 +96,13 @@ generate_hybrid_tree_html <- function(common_names, scientific_names) {
     }
     
     datelife_result <- tryCatch({
-      # Set timeout (90 seconds for hybrid tree DateLife query)
-      setTimeLimit(cpu = 90, elapsed = 90, transient = TRUE)
-      
-      # Call DateLife with cleaned names
+      # Call DateLife with cleaned names (remove timeout to prevent SIGPIPE)
       result <- get_datelife_result(input = cleaned_scientific_names, get_spp_from_taxon = FALSE, reference_taxonomy = 'opentree')
-      
-      # Reset timeout
-      setTimeLimit(cpu = Inf, elapsed = Inf, transient = FALSE)
       
       result
     }, error = function(e) {
-      # Reset timeout on error
-      setTimeLimit(cpu = Inf, elapsed = Inf, transient = FALSE)
-      
       if (grepl("timeout|time limit", e$message)) {
-        cat("DateLife query timed out after 90 seconds, falling back to topology-only tree\n")
+        cat("DateLife query timed out, falling back to topology-only tree\n")
         return(list())  # Return empty list to trigger topology-only fallback
       } else {
         cat("DateLife error:", e$message, "\n")
