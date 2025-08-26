@@ -2,6 +2,9 @@
 # Replaces tooltips with clickable info icons and expandable panels
 # Mobile-friendly alternative to hover-based tooltips
 
+# Source Wikipedia API functions
+source("functions/wikipedia_api.R")
+
 
 
 # Generate info panel HTML for ancestor nodes
@@ -73,12 +76,19 @@ format_panel_content <- function(node_data) {
         "No validated age data available"
       }
       
-      return(paste0(
+      content_html <- paste0(
         '<h4>', node_name, '</h4>',
         '<p class="ancestor-type">Evolutionary ancestor</p>',
         '<p class="age-unavailable">Age data unavailable</p>',
         '<p class="age-reason">', reason, '</p>'
-      ))
+      )
+      
+      # Add Wikipedia section for taxonomic nodes even without age data
+      if (is.list(node_data) && "NodeType" %in% names(node_data) && node_data$NodeType == "taxonomic") {
+        content_html <- paste0(content_html, format_wikipedia_section(node_data))
+      }
+      
+      return(content_html)
     }
     
     # Valid age - create comprehensive panel
@@ -110,15 +120,62 @@ format_panel_content <- function(node_data) {
       '</div>'
     )
     
+    # Add Wikipedia section for taxonomic nodes
+    if (is.list(node_data) && "NodeType" %in% names(node_data) && node_data$NodeType == "taxonomic") {
+      content_html <- paste0(content_html, format_wikipedia_section(node_data))
+    }
+    
     return(content_html)
   }
   
   # Fallback for unknown node types
-  return(paste0(
+  content_html <- paste0(
     '<h4>', node_name, '</h4>',
     '<p class="ancestor-type">Unknown ancestor</p>',
     '<p>Limited information available for this node.</p>'
-  ))
+  )
+  
+  # Add Wikipedia section for taxonomic nodes even in fallback case
+  if (is.list(node_data) && "NodeType" %in% names(node_data) && node_data$NodeType == "taxonomic") {
+    content_html <- paste0(content_html, format_wikipedia_section(node_data))
+  }
+  
+  return(content_html)
+}
+
+# Format Wikipedia section for taxonomic nodes
+format_wikipedia_section <- function(node_data) {
+  # Check if Wikipedia data is available
+  has_wikipedia <- !is.null(node_data$wikipedia_summary) && 
+                   !is.na(node_data$wikipedia_summary) && 
+                   nchar(as.character(node_data$wikipedia_summary)) > 0
+  
+  if (has_wikipedia) {
+    # Display Wikipedia content
+    wikipedia_html <- paste0(
+      '<div class="wikipedia-section">',
+      '<div class="wikipedia-content">',
+      '<div class="wikipedia-summary">', node_data$wikipedia_summary, '</div>',
+      '<a href="', node_data$wikipedia_url, '" target="_blank" rel="noopener noreferrer" class="wikipedia-link">',
+      'Read more on Wikipedia →',
+      '</a>',
+      '</div>',
+      '</div>'
+    )
+  } else {
+    # Show message that Wikipedia data is not available
+    wikipedia_html <- paste0(
+      '<div class="wikipedia-section">',
+      '<div class="wikipedia-content">',
+      '<p class="wikipedia-error" style="color: #95a5a6; font-size: 13px; font-style: italic;">',
+      'Wikipedia information not available for this taxonomic group',
+      '</p>',
+      '</div>',
+      '</div>'
+    )
+  }
+  
+  return(wikipedia_html)
 }
 
 # Generate CSS styles for the info panel system
@@ -242,6 +299,41 @@ generate_info_panel_css <- function() {
   margin: 4px 0;
 }
 
+.wikipedia-section {
+  border-top: 1px solid #e9ecef;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.wikipedia-loading {
+  color: #6c757d;
+  font-style: italic;
+  font-size: 13px;
+}
+
+.wikipedia-content {
+  margin-top: 8px;
+}
+
+.wikipedia-summary {
+  font-size: 14px;
+  line-height: 1.4;
+  color: #2c3e50;
+  margin: 8px 0;
+}
+
+.wikipedia-link {
+  display: inline-block;
+  margin-top: 8px;
+  color: #3498db;
+  text-decoration: none;
+  font-size: 13px;
+}
+
+.wikipedia-link:hover {
+  text-decoration: underline;
+}
+
 .close-panel {
   position: absolute;
   top: 4px;
@@ -328,6 +420,8 @@ function toggleInfoPanel(iconElement) {
       setTimeout(() => {
         document.addEventListener("click", handleClickOutside);
       }, 10);
+      
+      // No need to fetch Wikipedia data - it is already embedded server-side
     }
   }
 }
@@ -370,7 +464,7 @@ document.addEventListener("click", function(event) {
   }
 });
 
-console.log("Info panel system initialized");
+console.log("Info panel system initialized with server-side Wikipedia integration");
 </script>
   ')
 }
@@ -391,12 +485,54 @@ create_info_panel_data <- function(network_data) {
     if ("NodeType" %in% names(node_info) && node_info$NodeType == "species") {
       info_panel_data[i] <- ""  # No info panel for species
     } else {
+      # Add Wikipedia data for taxonomic nodes
+      if ("NodeType" %in% names(node_info) && node_info$NodeType == "taxonomic") {
+        node_info <- add_wikipedia_data(node_info)
+      }
+      
       # Return just the clean panel content, not the full widget HTML
       info_panel_data[i] <- format_panel_content(node_info)
     }
   }
   
   return(info_panel_data)
+}
+
+# Add Wikipedia data to taxonomic nodes
+add_wikipedia_data <- function(node_info) {
+  # Get the taxonomic group name
+  taxonomic_name <- if ("to" %in% names(node_info)) {
+    node_info$to
+  } else if ("Child" %in% names(node_info)) {
+    node_info$Child
+  } else {
+    return(node_info)  # Return unchanged if no name found
+  }
+  
+  # Try to fetch Wikipedia data using the existing Wikipedia API function
+  tryCatch({
+    # Check if wikipedia API function exists
+    if (exists("get_wikipedia_intro")) {
+      wikipedia_result <- get_wikipedia_intro(taxonomic_name, truncate_length = 250)
+      
+      if (wikipedia_result$success) {
+        # Add Wikipedia data to node_info
+        node_info$wikipedia_summary <- wikipedia_result$introduction
+        node_info$wikipedia_url <- wikipedia_result$url
+        node_info$wikipedia_title <- wikipedia_result$wikipedia_title
+      } else {
+        # Add empty Wikipedia data to indicate we tried but failed
+        node_info$wikipedia_summary <- NULL
+        node_info$wikipedia_url <- NULL
+        node_info$wikipedia_title <- NULL
+      }
+    }
+  }, error = function(e) {
+    # If there's an error, just don't add Wikipedia data
+    cat("Warning: Could not fetch Wikipedia data for", taxonomic_name, ":", e$message, "\n")
+  })
+  
+  return(node_info)
 }
 
 # Helper functions for age information formatting
