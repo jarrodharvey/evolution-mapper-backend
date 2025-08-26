@@ -79,8 +79,7 @@ format_panel_content <- function(node_data) {
       content_html <- paste0(
         '<h4>', node_name, '</h4>',
         '<p class="ancestor-type">Evolutionary ancestor</p>',
-        '<p class="age-unavailable">Age data unavailable</p>',
-        '<p class="age-reason">', reason, '</p>'
+        '<p class="age-unavailable">Age data unavailable</p>'
       )
       
       # Add Wikipedia section for taxonomic nodes even without age data
@@ -228,6 +227,11 @@ generate_info_panel_css <- function() {
   z-index: 1000;
   max-height: 400px;
   overflow-y: auto;
+}
+
+.info-panel.position-above {
+  top: auto;
+  bottom: 25px;
 }
 
 .info-panel-content {
@@ -416,6 +420,9 @@ function toggleInfoPanel(iconElement) {
     
     // Add click outside listener if panel is now open
     if (panel.style.display === "block") {
+      // Position the panel intelligently to avoid viewport cutoff
+      positionPanelInViewport(panel, iconElement);
+      
       // Small delay to prevent immediate closing from this click
       setTimeout(() => {
         document.addEventListener("click", handleClickOutside);
@@ -423,6 +430,25 @@ function toggleInfoPanel(iconElement) {
       
       // No need to fetch Wikipedia data - it is already embedded server-side
     }
+  }
+}
+
+function positionPanelInViewport(panel, iconElement) {
+  // Remove any existing positioning classes
+  panel.classList.remove("position-above");
+  
+  // Get panel and viewport dimensions
+  const panelHeight = 400; // max-height from CSS
+  const iconRect = iconElement.getBoundingClientRect();
+  const viewportHeight = window.innerHeight;
+  
+  // Calculate space below and above the icon
+  const spaceBelow = viewportHeight - iconRect.bottom;
+  const spaceAbove = iconRect.top;
+  
+  // If there is not enough space below (with some padding) and more space above, position above
+  if (spaceBelow < panelHeight + 50 && spaceAbove > spaceBelow) {
+    panel.classList.add("position-above");
   }
 }
 

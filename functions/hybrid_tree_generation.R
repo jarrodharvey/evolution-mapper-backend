@@ -500,7 +500,7 @@ transform_hybrid_to_info_panel_format <- function(network_data) {
                                       "Age data unavailable")
   info_panel_data$ValidationNotes <- ifelse(network_data$HasAge,
                                             NA_character_,
-                                            "Some species lack chronogram coverage")
+                                            NA_character_)
   
   return(info_panel_data)
 }
