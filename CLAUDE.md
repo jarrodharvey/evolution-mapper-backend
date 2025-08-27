@@ -113,36 +113,79 @@ lint("functions/tree_generation.R")
 ## Architecture Overview
 
 ### Core Components
-- **plumber.R**: Main API server with REST endpoints (`/api/health`, `/api/legend`, `/api/species`, `/api/tree`, `/api/dated-tree`, `/api/random-tree`)
+- **plumber.R**: Main API server with comprehensive REST endpoints and CORS configuration
 - **functions/rotl_tree_generation.R**: Core phylogenetic tree logic using Open Tree of Life (topology only)
 - **functions/datelife_tree_generation.R**: Dated tree generation using DateLife chronograms with ancestor ages
+- **functions/hybrid_tree_generation.R**: NEW - Hybrid trees combining ROTL topology with DateLife age data
+- **functions/info_panel_system.R**: NEW - Mobile-friendly info panels with Wikipedia/PhyloPic integration
+- **functions/tree_html_enhancement.R**: Advanced tree visualization customization
+- **functions/wikipedia_api.R**: Wikipedia integration for taxonomic information
+- **functions/phylopic_silhouettes.R**: PhyloPic integration for species silhouettes
+- **functions/color_config.R**: Centralized color scheme configuration
 - **data/species.sqlite**: Species database (90,276+ records with OTT IDs, common names, scientific names)
 
 ### API Features Overview
 - **Topology Trees**: Fast generation using common names, works for any species combination
 - **Dated Trees**: Age-calibrated trees using scientific names, limited to species with chronogram data
+- **Hybrid Trees**: NEW - Best of both worlds, ROTL topology with DateLife ages where available
+- **Info Panel System**: NEW - Mobile-friendly clickable info panels replacing tooltips
+- **Parallel Processing**: Performance-optimized data fetching for Wikipedia and PhyloPic content
 - **Fallback Strategy**: Frontend can attempt dated trees first, fall back to topology trees
-- **Interactive Visualization**: Color-coded CollapsibleTree with age tooltips and geological periods
+- **Interactive Visualization**: Color-coded CollapsibleTree with age tooltips, geological periods, and species silhouettes
 
 ### API Endpoints
+- **GET /api/health**: Health check endpoint (no API key required)
 - **GET /api/species?search=term&limit=N**: Search species by name (case-insensitive, default limit 50, max 100)
+- **GET /api/random-species?count=N**: Get random species for testing
 - **POST /api/tree**: Generate topology-only phylogenetic tree from paired species lists (common + scientific names)
 - **POST /api/dated-tree**: Generate dated phylogenetic tree with chronogram ages (common + scientific names required, limited coverage)
+- **POST /api/full-tree-dated**: Generate hybrid tree combining ROTL topology with DateLife age data where available
 - **GET /api/random-tree?count=N**: Generate random tree for testing (topology only)
 - **GET /api/legend**: Get legend information for tree visualization colors and node types
 - **GET /api/wikipedia_truncated_intro?taxonomic_group=name&truncate_length=N**: Get truncated Wikipedia introduction for taxonomic groups
-- **GET /api/health**: Health check endpoint
+- **GET /api/citations**: Get citation information for data sources
+- **GET /api/debug-tree?count=N**: Debug endpoint for tree generation testing
 
-### New Dated Tree API (/api/dated-tree)
+### Hybrid Tree API (/api/full-tree-dated)
+**NEWEST FEATURE**: The hybrid tree system provides the best of both worlds - complete species coverage from ROTL with age information from DateLife where available.
+
+**Key Advantages:**
+- Always generates a complete tree (no missing species like pure DateLife approach)
+- Incorporates age data where available from DateLife chronogram database
+- Uses ROTL topology as the reliable backbone for all species relationships
+- Provides graceful degradation when age data is unavailable
+- Enhanced mobile-friendly visualization with info panels instead of tooltips
+
+**Usage Pattern:**
+```bash
+# Generate hybrid tree with info panels and age data where available
+curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis catus" http://localhost:8000/api/full-tree-dated
+```
+
+**Enhanced Features:**
+- **Info Panel System**: Clickable info icons instead of hover tooltips (mobile-friendly)
+- **Wikipedia Integration**: Contextual information about ancestral taxonomic groups  
+- **PhyloPic Silhouettes**: Species silhouette images where available
+- **Parallel Processing**: Performance-optimized data fetching for external APIs
+- **Age Visualization**: Ancestor ages displayed in millions of years (Mya) with geological context
+- **Smart Layout**: Dynamic link lengths optimized for age information display
+
+### Dated Tree API (/api/dated-tree)
 **MAJOR FEATURE**: Added in current session - provides age-calibrated phylogenetic trees using DateLife chronogram database.
 
 **Usage Pattern:**
 ```bash
+# Generate hybrid tree (ROTL topology + DateLife ages where available)
+curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis catus" http://localhost:8000/api/full-tree-dated
+
 # Generate dated tree with chronogram ages (requires scientific names)
-curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "species=Homo sapiens,Canis lupus" http://localhost:8000/api/dated-tree
+curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "common_names=Human,Dog&scientific_names=Homo sapiens,Canis lupus" http://localhost:8000/api/dated-tree
 
 # Allow partial trees when some species missing from chronogram data
-curl -X POST -H "X-API-Key: YOUR-API-Key" -d "species=Homo sapiens,Canis lupus,Felis catus&allow_partial_response=true" http://localhost:8000/api/dated-tree
+curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis catus&allow_partial_response=true" http://localhost:8000/api/dated-tree
+
+# Get random species for testing
+curl -H "X-API-Key: YOUR-API-KEY" "http://localhost:8000/api/random-species?count=5"
 ```
 
 **Key Features:**
@@ -166,11 +209,21 @@ curl -X POST -H "X-API-Key: YOUR-API-Key" -d "species=Homo sapiens,Canis lupus,F
 - Recommended to always implement fallback to topology-only trees
 
 ### Key Functions
+
+**Core Tree Generation:**
 - `convert_rotl_to_hierarchy()`: Converts phylogenetic tree from Open Tree of Life to hierarchical structure
 - `generate_tree_html()`: Creates CollapsibleTree HTML visualization with color coding
+- `generate_hybrid_tree_html()`: NEW - Creates hybrid trees with ROTL topology + DateLife ages
 - `search_species()`: Searches SQLite database for species with optional search term and limit
 - `get_species_from_db()`: Queries SQLite database for species data by common name
 - `trace_path_to_root()`: Walks tree structure from species to root ancestor
+
+**Enhancement Functions:**
+- `generate_info_panel_html()`: Creates mobile-friendly info panels for ancestor nodes
+- `fetch_wikipedia_info()`: Retrieves Wikipedia content for taxonomic groups
+- `fetch_phylopic_silhouettes()`: Gets species silhouette images from PhyloPic API
+- `calculate_dynamic_link_length_hybrid()`: Optimizes tree layout for hybrid visualizations
+- `clean_scientific_names()`: Sanitizes scientific names for database queries
 
 ### Data Flow
 
@@ -190,6 +243,18 @@ curl -X POST -H "X-API-Key: YOUR-API-Key" -d "species=Homo sapiens,Canis lupus,F
 5. CollapsibleTree generates interactive HTML with age information in tooltips, preserving user-provided common names
 6. Frontend falls back to /api/tree if DateLife coverage insufficient
 
+**Hybrid Trees (/api/full-tree-dated):**
+1. API receives paired species lists (common + scientific names)
+2. ROTL provides complete phylogenetic topology for all species (always succeeds)
+3. DateLife searches chronogram database in parallel for age data where available
+4. Hybrid tree merges ROTL structure with DateLife ages using median consensus
+5. Info panel system generates mobile-friendly clickable panels with:
+   - Wikipedia content fetched in parallel for taxonomic groups
+   - PhyloPic silhouettes fetched in parallel for species
+   - Age information with geological context where available
+6. CollapsibleTree generates enhanced HTML with info panels, preserving user-provided common names
+7. Always returns complete tree (no fallback needed - major advantage over pure DateLife approach)
+
 ### Database Schema
 ```sql
 CREATE TABLE species (
@@ -200,6 +265,19 @@ CREATE TABLE species (
 ```
 
 ## Development Notes
+
+### Performance Considerations
+- **Parallel Processing**: Wikipedia and PhyloPic data fetching uses parallel processing for improved performance
+- **Database Optimization**: SQLite database with indexed queries for fast species lookup
+- **External API Limits**: Rate-limited calls to Wikipedia and PhyloPic APIs to avoid service disruption
+- **Memory Management**: Large phylogenetic trees are processed efficiently with streaming where possible
+- **Error Handling**: Robust error recovery for external API failures (Wikipedia, PhyloPic, DateLife)
+
+### Mobile-First Design
+- **Info Panels**: Replaces hover-based tooltips with clickable info panels for mobile compatibility
+- **Responsive Layout**: CollapsibleTree visualizations adapt to different screen sizes
+- **Touch-Friendly**: Info panel system designed for touch interfaces
+- **Progressive Enhancement**: Trees work with basic functionality even when external APIs fail
 
 ### Tree Generation Logic
 - Minimum 2 species required for tree generation
@@ -215,6 +293,7 @@ All endpoints return JSON with `success` boolean and either `error` message or r
 - **Blue (#3498DB)**: Unnamed evolutionary ancestors  
 - **Orange (#F39C12)**: Named taxonomic groups (families, orders, etc.)
 - **Green (#27AE60)**: Species (leaf nodes)
+- **Color variations**: Enhanced with opacity and gradients in hybrid trees for age visualization
 
 ### Wikipedia API Documentation
 **NEW ENDPOINT**: `/api/wikipedia_truncated_intro` provides Wikipedia article introductions for taxonomic groups.
@@ -278,4 +357,13 @@ result <- generate_tree_html(test_species)
 source("functions/datelife_tree_generation.R")
 test_species_sci <- c("Homo sapiens", "Canis lupus")
 datelife_result <- get_datelife_result(input = test_species_sci)
+
+# Test hybrid trees (NEW)
+source("functions/hybrid_tree_generation.R")
+common_names <- c("Human", "Dog", "Cat")
+scientific_names <- c("Homo sapiens", "Canis lupus", "Felis catus")
+hybrid_result <- generate_hybrid_tree_html(common_names, scientific_names)
+
+# Performance testing
+source("test_parallel_performance.R")  # Benchmarks parallel processing improvements
 ```
