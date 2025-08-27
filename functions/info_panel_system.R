@@ -475,7 +475,7 @@ generate_info_panel_css <- function() {
 }
 
 .taxonomic-wrapped-container .wikipedia-summary {
-  text-align: justify;
+  text-align: left;
   word-wrap: break-word;
   overflow-wrap: break-word;
   margin: 0 0 8px 0;
