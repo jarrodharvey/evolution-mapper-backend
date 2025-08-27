@@ -299,7 +299,7 @@ function(count = NULL) {
     species_db <- dbConnect(SQLite(), db_path)
     
     query <- paste0(
-      "SELECT common FROM species ",
+      "SELECT common, scientific FROM species ",
       "WHERE ott IS NOT NULL AND ott != '' AND common IS NOT NULL ",
       "ORDER BY RANDOM() LIMIT ", count
     )
@@ -307,12 +307,12 @@ function(count = NULL) {
     random_species_data <- dbGetQuery(species_db, query)
     dbDisconnect(species_db)
     
-    random_species <- random_species_data$common
-    
     return(list(
       success = TRUE,
-      count = length(random_species),
-      species = random_species
+      selected_species = list(
+        common_names = random_species_data$common,
+        scientific_names = random_species_data$scientific
+      )
     ))
   }, error = function(e) {
     return(list(
