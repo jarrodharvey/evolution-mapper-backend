@@ -809,14 +809,19 @@ create_info_panel_data_parallel <- function(network_data) {
     clusterEvalQ(cl, {
       library(httr)
       library(rphylopic)
+      library(png)
+      library(base64enc)
     })
+    
+    # Source the necessary function files on each worker
+    clusterEvalQ(cl, {
+      source("functions/wikipedia_api.R")
+      source("functions/phylopic_silhouettes.R")
+    })
+    
     clusterExport(cl, c(
-      "get_wikipedia_intro", 
-      "get_silhouette_data", 
-      "format_silhouette_html",
-      "format_panel_content",
       "extract_taxonomic_name"
-    ), envir = .GlobalEnv)
+    ), envir = environment())
     
     # Process taxonomic nodes in parallel
     parallel_results <- tryCatch({
