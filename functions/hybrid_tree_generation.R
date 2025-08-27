@@ -9,6 +9,7 @@ library(collapsibleTree)
 library(RSQLite)
 library(DBI)
 library(dplyr)
+library(parallel)
 
 source("functions/rotl_tree_generation.R")
 source("functions/color_config.R")
@@ -50,8 +51,8 @@ generate_hybrid_tree_html <- function(common_names, scientific_names) {
   tryCatch({
     cat("=== GENERATING HYBRID TREE (ROTL + DateLife) ===\n")
     
-    # Step 1: Get complete topology from ROTL
-    cat("Getting complete topology from ROTL...\n")
+    # Step 1: Get species data and check validity
+    cat("Getting species data from database...\n")
     species_data <- get_species_from_db_paired(common_names, scientific_names)
     valid_species <- species_data[!is.na(species_data$ott), ]
     
@@ -74,19 +75,10 @@ generate_hybrid_tree_html <- function(common_names, scientific_names) {
       ))
     }
     
-    rotl_tree <- tol_induced_subtree(ott_ids = valid_species$ott)
+    # Step 2: Run ROTL and DateLife calls in parallel
+    cat("Running ROTL and DateLife queries in parallel...\n")
     
-    if (is.null(rotl_tree)) {
-      return(list(
-        success = FALSE,
-        error = "Failed to get tree from Open Tree of Life"
-      ))
-    }
-    
-    # Step 2: Try to get DateLife age data for available species
-    cat("Getting age data from DateLife...\n")
-    
-    # Clean scientific names to remove parenthetical addendums that can cause phylocom parsing issues
+    # Clean scientific names for DateLife
     cleaned_scientific_names <- clean_scientific_names(scientific_names)
     cat("Cleaned scientific names for DateLife query:\n")
     for (i in seq_along(scientific_names)) {
@@ -95,20 +87,66 @@ generate_hybrid_tree_html <- function(common_names, scientific_names) {
       }
     }
     
-    datelife_result <- tryCatch({
-      # Call DateLife with cleaned names (remove timeout to prevent SIGPIPE)
-      result <- get_datelife_result(input = cleaned_scientific_names, get_spp_from_taxon = FALSE, reference_taxonomy = 'opentree')
-      
-      result
-    }, error = function(e) {
-      if (grepl("timeout|time limit", e$message)) {
-        cat("DateLife query timed out, falling back to topology-only tree\n")
-        return(list())  # Return empty list to trigger topology-only fallback
-      } else {
-        cat("DateLife error:", e$message, "\n")
-        return(list())  # Return empty list for other errors too
-      }
+    # Create parallel cluster (use 2 cores for the two main API calls)
+    cl <- makeCluster(2)
+    
+    # Export necessary libraries and data to cluster nodes
+    clusterEvalQ(cl, {
+      library(rotl)
+      library(datelife)
+      library(ape)
     })
+    clusterExport(cl, c("valid_species", "cleaned_scientific_names"), envir = environment())
+    
+    # Define parallel tasks
+    parallel_results <- tryCatch({
+      parLapply(cl, list(
+        # Task 1: ROTL query
+        list(task = "rotl", data = valid_species),
+        # Task 2: DateLife query  
+        list(task = "datelife", data = cleaned_scientific_names)
+      ), function(task_info) {
+        if (task_info$task == "rotl") {
+          tryCatch({
+            rotl_tree <- tol_induced_subtree(ott_ids = task_info$data$ott)
+            return(list(success = TRUE, result = rotl_tree, task = "rotl"))
+          }, error = function(e) {
+            return(list(success = FALSE, error = e$message, task = "rotl"))
+          })
+        } else if (task_info$task == "datelife") {
+          tryCatch({
+            datelife_result <- get_datelife_result(input = task_info$data, get_spp_from_taxon = FALSE, reference_taxonomy = 'opentree')
+            return(list(success = TRUE, result = datelife_result, task = "datelife"))
+          }, error = function(e) {
+            return(list(success = FALSE, error = e$message, task = "datelife", result = list()))
+          })
+        }
+      })
+    }, finally = {
+      stopCluster(cl)
+    })
+    
+    # Extract results from parallel execution
+    rotl_result <- parallel_results[[1]]
+    datelife_result_wrapper <- parallel_results[[2]]
+    
+    # Handle ROTL result
+    if (!rotl_result$success || is.null(rotl_result$result)) {
+      return(list(
+        success = FALSE,
+        error = paste("Failed to get tree from Open Tree of Life:", rotl_result$error)
+      ))
+    }
+    rotl_tree <- rotl_result$result
+    
+    # Handle DateLife result
+    if (datelife_result_wrapper$success) {
+      datelife_result <- datelife_result_wrapper$result
+      cat("DateLife parallel query completed successfully\n")
+    } else {
+      datelife_result <- list()
+      cat("DateLife parallel query failed:", datelife_result_wrapper$error, "\n")
+    }
     
     # Step 3: Create age mapping from DateLife data
     datelife_phylo <- NULL

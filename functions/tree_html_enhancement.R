@@ -10,8 +10,8 @@ source("functions/info_panel_system.R")
 #' @param network_data Network data with node information for info panels
 #' @return Enhanced tree_data with InfoPanel column
 add_info_panel_data <- function(tree_data, network_data) {
-  # Create info panel data for ancestor nodes
-  info_panels <- create_info_panel_data(network_data)
+  # Create info panel data for ancestor nodes using parallel processing
+  info_panels <- create_info_panel_data_parallel(network_data)
   
   # Add InfoPanel column to tree data
   tree_data$InfoPanel <- info_panels
@@ -24,8 +24,8 @@ add_info_panel_data <- function(tree_data, network_data) {
 #' @return JSON string for JavaScript
 create_info_panel_data_js <- function(network_data) {
   
-  # Create info panel data for all nodes
-  info_panels <- create_info_panel_data(network_data)
+  # Create info panel data for all nodes using parallel processing
+  info_panels <- create_info_panel_data_parallel(network_data)
   
   # Create mapping of node names to info panel HTML
   node_names <- if ("Child" %in% names(network_data)) {

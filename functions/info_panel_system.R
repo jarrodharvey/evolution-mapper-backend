@@ -8,6 +8,9 @@ source("functions/wikipedia_api.R")
 # Source PhyloPic silhouette functions
 source("functions/phylopic_silhouettes.R")
 
+# Load parallel processing library
+library(parallel)
+
 
 
 # Generate info panel HTML for ancestor nodes
@@ -764,6 +767,146 @@ console.log("Info panel system initialized with server-side Wikipedia integratio
 }
 
 # Create info panel data for network
+# Parallel version of create_info_panel_data for improved performance
+create_info_panel_data_parallel <- function(network_data) {
+  # Handle both naming conventions: "to" (ROTL) and "Child" (DateLife)
+  if (!("to" %in% names(network_data)) && !("Child" %in% names(network_data))) {
+    return(rep("", nrow(network_data)))
+  }
+  
+  info_panel_data <- character(nrow(network_data))
+  
+  # Identify nodes that need taxonomic content (Wikipedia + PhyloPic data)
+  taxonomic_indices <- c()
+  taxonomic_node_info <- list()
+  
+  for (i in 1:nrow(network_data)) {
+    node_info <- as.list(network_data[i, ])
+    
+    # Only show info panels for ancestor nodes (not species)
+    if ("NodeType" %in% names(node_info) && node_info$NodeType == "species") {
+      info_panel_data[i] <- ""  # No info panel for species
+    } else {
+      # Check if this node needs taxonomic content
+      if (should_add_taxonomic_content(node_info)) {
+        taxonomic_indices <- c(taxonomic_indices, i)
+        taxonomic_node_info[[length(taxonomic_node_info) + 1]] <- list(index = i, node_info = node_info)
+      } else {
+        # Generate panel content without taxonomic data
+        info_panel_data[i] <- format_panel_content(node_info)
+      }
+    }
+  }
+  
+  # If we have taxonomic nodes, process them in parallel
+  if (length(taxonomic_indices) > 0) {
+    cat("Processing", length(taxonomic_indices), "taxonomic nodes in parallel...\n")
+    
+    # Create parallel cluster
+    cl <- makeCluster(min(length(taxonomic_indices), 4))  # Use at most 4 cores
+    
+    # Export necessary functions and libraries to cluster nodes
+    clusterEvalQ(cl, {
+      library(httr)
+      library(rphylopic)
+    })
+    clusterExport(cl, c(
+      "get_wikipedia_intro", 
+      "get_silhouette_data", 
+      "format_silhouette_html",
+      "format_panel_content",
+      "extract_taxonomic_name"
+    ), envir = .GlobalEnv)
+    
+    # Process taxonomic nodes in parallel
+    parallel_results <- tryCatch({
+      parLapply(cl, taxonomic_node_info, function(item) {
+        node_info <- item$node_info
+        
+        # Extract taxonomic name
+        taxonomic_name <- extract_taxonomic_name(node_info)
+        
+        # Skip if it's a generic ancestor name
+        if (is.null(taxonomic_name) || 
+            grepl("^(Ancestor|Node)\\s+[A-Z]$", taxonomic_name) || 
+            grepl("^Common ancestor", taxonomic_name) ||
+            nchar(trimws(taxonomic_name)) <= 2) {
+          return(list(index = item$index, node_info = node_info))
+        }
+        
+        # Fetch Wikipedia and PhyloPic data sequentially within each parallel worker
+        # (simpler than nested parallelization, still faster overall since nodes are processed in parallel)
+        
+        # Try Wikipedia API call
+        tryCatch({
+          if (exists("get_wikipedia_intro")) {
+            wikipedia_result <- get_wikipedia_intro(taxonomic_name, truncate_length = 250)
+            if (wikipedia_result$success) {
+              node_info$wikipedia_summary <- wikipedia_result$introduction
+              node_info$wikipedia_url <- wikipedia_result$url
+              node_info$wikipedia_title <- wikipedia_result$wikipedia_title
+            }
+          }
+        }, error = function(e) {
+          # If there's an error, just don't add Wikipedia data
+        })
+        
+        # Try PhyloPic API call
+        tryCatch({
+          if (exists("get_silhouette_data")) {
+            silhouette_result <- get_silhouette_data(taxonomic_name)
+            if (silhouette_result$success) {
+              silhouette_html <- format_silhouette_html(silhouette_result)
+              node_info$silhouette_html <- silhouette_html
+              node_info$silhouette_uuid <- silhouette_result$uuid
+              node_info$silhouette_attribution <- silhouette_result$attribution
+            }
+          }
+        }, error = function(e) {
+          # If there's an error, just don't add silhouette data
+        })
+        
+        return(list(index = item$index, node_info = node_info))
+      })
+    }, finally = {
+      stopCluster(cl)
+    })
+    
+    # Apply the parallel results back to info_panel_data
+    for (result in parallel_results) {
+      info_panel_data[result$index] <- format_panel_content(result$node_info)
+    }
+    
+    cat("Completed parallel processing of taxonomic nodes\n")
+  }
+  
+  return(info_panel_data)
+}
+
+# Helper function to extract taxonomic name from node info
+extract_taxonomic_name <- function(node_info) {
+  if ("to" %in% names(node_info)) {
+    raw_name <- node_info$to
+  } else if ("Child" %in% names(node_info)) {
+    raw_name <- node_info$Child
+  } else if ("Name" %in% names(node_info)) {
+    raw_name <- node_info$Name
+  } else {
+    return(NULL)
+  }
+  
+  # Extract taxonomic name from hybrid nodes like "Spermatophyta (352.2 Mya)"
+  if (grepl("\\([0-9]+\\.[0-9]+\\s*Mya\\)", raw_name)) {
+    # Extract just the taxonomic part before the age
+    taxonomic_name <- sub("\\s*\\([0-9]+\\.[0-9]+\\s*Mya\\)$", "", raw_name)
+    taxonomic_name <- trimws(taxonomic_name)
+  } else {
+    taxonomic_name <- raw_name
+  }
+  
+  return(taxonomic_name)
+}
+
 create_info_panel_data <- function(network_data) {
   # Handle both naming conventions: "to" (ROTL) and "Child" (DateLife)
   if (!("to" %in% names(network_data)) && !("Child" %in% names(network_data))) {
