@@ -5,6 +5,9 @@
 # Source Wikipedia API functions
 source("functions/wikipedia_api.R")
 
+# Source PhyloPic silhouette functions
+source("functions/phylopic_silhouettes.R")
+
 
 
 # Generate info panel HTML for ancestor nodes
@@ -82,9 +85,9 @@ format_panel_content <- function(node_data) {
         '<p class="age-unavailable">Age data unavailable</p>'
       )
       
-      # Add Wikipedia section for taxonomic nodes even without age data
-      if (is.list(node_data) && "NodeType" %in% names(node_data) && node_data$NodeType == "taxonomic") {
-        content_html <- paste0(content_html, format_wikipedia_section(node_data))
+      # Add silhouette and Wikipedia sections side by side for taxonomic nodes even without age data
+      if (is.list(node_data) && should_add_taxonomic_content(node_data)) {
+        content_html <- paste0(content_html, format_combined_taxonomic_section(node_data))
       }
       
       return(content_html)
@@ -110,18 +113,18 @@ format_panel_content <- function(node_data) {
       )
     }
     
-    # Add confidence and source information
+    # Add source information (removed star rating for compactness)
     content_html <- paste0(content_html,
       '<div class="confidence-info">',
-      '<p class="confidence-stars">', confidence_stars, '</p>',
       '<p class="data-source">', source_text, '</p>',
       '</div>',
       '</div>'
     )
     
-    # Add Wikipedia section for taxonomic nodes
-    if (is.list(node_data) && "NodeType" %in% names(node_data) && node_data$NodeType == "taxonomic") {
-      content_html <- paste0(content_html, format_wikipedia_section(node_data))
+    # Add silhouette and Wikipedia sections side by side for nodes that have taxonomic information
+    # This includes both pure taxonomic nodes AND hybrid nodes with both age and taxonomic data
+    if (is.list(node_data) && should_add_taxonomic_content(node_data)) {
+      content_html <- paste0(content_html, format_combined_taxonomic_section(node_data))
     }
     
     return(content_html)
@@ -134,12 +137,112 @@ format_panel_content <- function(node_data) {
     '<p>Limited information available for this node.</p>'
   )
   
-  # Add Wikipedia section for taxonomic nodes even in fallback case
-  if (is.list(node_data) && "NodeType" %in% names(node_data) && node_data$NodeType == "taxonomic") {
-    content_html <- paste0(content_html, format_wikipedia_section(node_data))
+  # Add silhouette and Wikipedia sections side by side for nodes with taxonomic information even in fallback case
+  if (is.list(node_data) && should_add_taxonomic_content(node_data)) {
+    content_html <- paste0(content_html, format_combined_taxonomic_section(node_data))
   }
   
   return(content_html)
+}
+
+# Helper function to determine if a node should get taxonomic content (silhouettes/Wikipedia)
+should_add_taxonomic_content <- function(node_data) {
+  # Check if this node has taxonomic information
+  # This includes both pure taxonomic nodes and hybrid nodes with taxonomic names
+  if ("NodeType" %in% names(node_data)) {
+    return(node_data$NodeType == "taxonomic" || 
+           (node_data$NodeType == "ancestor" && has_extractable_taxonomic_name(node_data)))
+  }
+  return(FALSE)
+}
+
+# Helper function to check if an ancestor node has an extractable taxonomic name
+has_extractable_taxonomic_name <- function(node_data) {
+  # Check if the node has a name that contains a recognizable taxonomic group
+  # For example: "Spermatophyta (352.2 Mya)" should extract "Spermatophyta"
+  if ("Name" %in% names(node_data) && !is.null(node_data$Name) && !is.na(node_data$Name)) {
+    node_name <- as.character(node_data$Name)
+    # Extract taxonomic name from hybrid format like "GroupName (age Mya)"
+    taxonomic_match <- regmatches(node_name, regexpr("^([A-Za-z][A-Za-z ]+?)\\s*\\([0-9]+\\.[0-9]+\\s*Mya\\)$", node_name, perl = TRUE))
+    if (length(taxonomic_match) > 0) {
+      # Extract just the taxonomic part before the age
+      taxonomic_name <- sub("\\s*\\([0-9]+\\.[0-9]+\\s*Mya\\)$", "", node_name)
+      # Check if it's not a generic ancestor name
+      return(!grepl("^(Ancestor|Node)\\s+[A-Z]$", taxonomic_name) && 
+             !grepl("^Common ancestor", taxonomic_name) &&
+             nchar(trimws(taxonomic_name)) > 2)
+    }
+  }
+  return(FALSE)
+}
+
+# Format combined silhouette and Wikipedia section side by side
+format_combined_taxonomic_section <- function(node_data) {
+  has_silhouette <- !is.null(node_data$silhouette_html) && 
+                    !is.na(node_data$silhouette_html) && 
+                    nchar(as.character(node_data$silhouette_html)) > 0
+  
+  has_wikipedia <- !is.null(node_data$wikipedia_summary) && 
+                   !is.na(node_data$wikipedia_summary) && 
+                   nchar(as.character(node_data$wikipedia_summary)) > 0
+  
+  if (!has_silhouette && !has_wikipedia) {
+    return("")
+  }
+  
+  # Start the combined section
+  combined_html <- '<div class="taxonomic-combined-section">'
+  
+  if (has_silhouette && has_wikipedia) {
+    # Both silhouette and Wikipedia - silhouette floated left with text wrapping
+    combined_html <- paste0(combined_html,
+      '<div class="taxonomic-wrapped-container">',
+      '<div class="silhouette-float">',
+      node_data$silhouette_html,
+      '</div>',
+      format_wikipedia_content(node_data),
+      '</div>'
+    )
+  } else if (has_silhouette) {
+    # Only silhouette
+    combined_html <- paste0(combined_html,
+      '<div class="silhouette-only">',
+      node_data$silhouette_html,
+      '</div>'
+    )
+  } else if (has_wikipedia) {
+    # Only Wikipedia
+    combined_html <- paste0(combined_html,
+      '<div class="wikipedia-only">',
+      format_wikipedia_content(node_data),
+      '</div>'
+    )
+  }
+  
+  combined_html <- paste0(combined_html, '</div>')
+  return(combined_html)
+}
+
+# Format Wikipedia content without section wrapper
+format_wikipedia_content <- function(node_data) {
+  paste0(
+    '<div class="wikipedia-summary">', node_data$wikipedia_summary, '</div>',
+    '<a href="', node_data$wikipedia_url, '" target="_blank" rel="noopener noreferrer" class="wikipedia-link">Read more on Wikipedia →</a>'
+  )
+}
+
+# Format silhouette section for taxonomic nodes (kept for backward compatibility)
+format_silhouette_section <- function(node_data) {
+  # Check if silhouette data is available
+  has_silhouette <- !is.null(node_data$silhouette_html) && 
+                    !is.na(node_data$silhouette_html) && 
+                    nchar(as.character(node_data$silhouette_html)) > 0
+  
+  if (has_silhouette) {
+    return(node_data$silhouette_html)
+  } else {
+    return("")  # Return empty string if no silhouette available
+  }
 }
 
 # Format Wikipedia section for taxonomic nodes
@@ -218,8 +321,8 @@ generate_info_panel_css <- function() {
 .info-panel {
   position: absolute;
   top: 25px;
-  left: -150px;
-  width: 320px;
+  left: -200px;
+  width: 450px;
   background: white;
   border: 2px solid #3498db;
   border-radius: 8px;
@@ -232,6 +335,18 @@ generate_info_panel_css <- function() {
 .info-panel.position-above {
   top: auto;
   bottom: 25px;
+}
+
+.info-panel.position-left {
+  left: -470px; /* panel width (450px) + some padding */
+}
+
+.info-panel.position-right {
+  left: 25px; /* position to the right of the icon */
+}
+
+.info-panel.position-center {
+  left: -225px; /* center the panel (half of 450px width) */
 }
 
 .info-panel-content {
@@ -303,6 +418,114 @@ generate_info_panel_css <- function() {
   margin: 4px 0;
 }
 
+.silhouette-section {
+  border-top: 1px solid #e9ecef;
+  margin-top: 12px;
+  padding-top: 12px;
+  text-align: center;
+}
+
+.silhouette-container {
+  margin: 8px 0;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 4px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 80px;
+  width: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.ancestor-silhouette {
+  max-width: 90px;
+  max-height: 90px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
+  display: block;
+  margin: 0 auto;
+}
+
+/* Silhouette attribution removed - cited on about page */
+
+/* New combined taxonomic section styles */
+.taxonomic-combined-section {
+  border-top: 1px solid #e9ecef;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+/* New wrapped layout for silhouette + Wikipedia */
+.taxonomic-wrapped-container {
+  overflow: hidden; /* Clear float */
+}
+
+.silhouette-float {
+  float: left;
+  width: 100px;
+  margin-right: 12px;
+  margin-bottom: 8px;
+}
+
+.taxonomic-wrapped-container .wikipedia-summary {
+  text-align: justify;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  line-height: 1.3;
+  color: #495057;
+}
+
+/* Legacy flex container for compatibility */
+.taxonomic-flex-container {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.silhouette-column {
+  flex: 0 0 auto;
+  width: 100px; /* Fixed width to minimize white space */
+}
+
+.wikipedia-column {
+  flex: 1;
+  min-width: 0;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.silhouette-only,
+.wikipedia-only {
+  width: 100%;
+}
+
+.silhouette-column .silhouette-section,
+.silhouette-only .silhouette-section,
+.silhouette-float .silhouette-section {
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.silhouette-column .silhouette-container,
+.silhouette-only .silhouette-container {
+  margin: 0;
+  height: 70px; /* Slightly smaller for side-by-side layout */
+}
+
+.wikipedia-column .wikipedia-summary,
+.wikipedia-only .wikipedia-summary {
+  margin: 0 0 8px 0;
+  font-size: 13px; /* Slightly smaller for compactness */
+  line-height: 1.3;
+}
+
 .wikipedia-section {
   border-top: 1px solid #e9ecef;
   margin-top: 12px;
@@ -364,10 +587,21 @@ generate_info_panel_css <- function() {
 /* Mobile responsive styles */
 @media (max-width: 768px) {
   .info-panel {
-    left: -120px;
-    width: 280px;
-    max-height: 300px;
+    left: -180px;
+    width: 380px;
+    max-height: 350px;
   }
+  
+  .taxonomic-flex-container {
+    flex-direction: column;
+    gap: 12px;
+  }
+  
+  .silhouette-column {
+    flex: none;
+    width: 100%;
+  }
+}
   
   .info-icon {
     width: 20px;
@@ -384,9 +618,9 @@ generate_info_panel_css <- function() {
 /* Very small screens */
 @media (max-width: 480px) {
   .info-panel {
-    left: -100px;
-    width: 240px;
-    max-height: 250px;
+    left: -140px;
+    width: 320px;
+    max-height: 300px;
   }
   
   .info-panel-content h4 {
@@ -435,20 +669,54 @@ function toggleInfoPanel(iconElement) {
 
 function positionPanelInViewport(panel, iconElement) {
   // Remove any existing positioning classes
-  panel.classList.remove("position-above");
+  panel.classList.remove("position-above", "position-left", "position-right", "position-center");
   
-  // Get panel and viewport dimensions
+  // Get dimensions
+  const panelWidth = 450; // panel width from CSS
   const panelHeight = 400; // max-height from CSS
   const iconRect = iconElement.getBoundingClientRect();
+  const viewportWidth = window.innerWidth;
   const viewportHeight = window.innerHeight;
+  const padding = 20; // minimum distance from viewport edge
   
-  // Calculate space below and above the icon
+  // Calculate available space in all directions
   const spaceBelow = viewportHeight - iconRect.bottom;
   const spaceAbove = iconRect.top;
+  const spaceLeft = iconRect.left;
+  const spaceRight = viewportWidth - iconRect.right;
   
-  // If there is not enough space below (with some padding) and more space above, position above
-  if (spaceBelow < panelHeight + 50 && spaceAbove > spaceBelow) {
+  // Determine vertical positioning (above vs below)
+  const needsAbove = spaceBelow < panelHeight + padding && spaceAbove > spaceBelow;
+  if (needsAbove) {
     panel.classList.add("position-above");
+  }
+  
+  // Determine horizontal positioning
+  // Default position is left: -225px (panel centered on icon, half of 450px width)
+  const defaultLeft = -225;
+  const panelLeftEdge = iconRect.left + defaultLeft;
+  const panelRightEdge = panelLeftEdge + panelWidth;
+  
+  if (panelLeftEdge < padding) {
+    // Panel would extend beyond left edge - position to the right
+    panel.classList.add("position-right");
+  } else if (panelRightEdge > viewportWidth - padding) {
+    // Panel would extend beyond right edge - position to the left
+    panel.classList.add("position-left");
+  } else {
+    // Default centered position works fine
+    panel.classList.add("position-center");
+  }
+  
+  // Additional check: if panel is still too tall even when positioned above/below
+  if ((needsAbove && spaceAbove < panelHeight + padding) || 
+      (!needsAbove && spaceBelow < panelHeight + padding)) {
+    // Reduce panel height to fit available space
+    const maxHeight = Math.max(200, (needsAbove ? spaceAbove : spaceBelow) - padding);
+    panel.style.maxHeight = maxHeight + "px";
+  } else {
+    // Reset to default max-height
+    panel.style.maxHeight = "400px";
   }
 }
 
@@ -511,8 +779,8 @@ create_info_panel_data <- function(network_data) {
     if ("NodeType" %in% names(node_info) && node_info$NodeType == "species") {
       info_panel_data[i] <- ""  # No info panel for species
     } else {
-      # Add Wikipedia data for taxonomic nodes
-      if ("NodeType" %in% names(node_info) && node_info$NodeType == "taxonomic") {
+      # Add Wikipedia and silhouette data for nodes with taxonomic content
+      if (should_add_taxonomic_content(node_info)) {
         node_info <- add_wikipedia_data(node_info)
       }
       
@@ -524,15 +792,36 @@ create_info_panel_data <- function(network_data) {
   return(info_panel_data)
 }
 
-# Add Wikipedia data to taxonomic nodes
+# Add Wikipedia and silhouette data to taxonomic nodes
 add_wikipedia_data <- function(node_info) {
-  # Get the taxonomic group name
-  taxonomic_name <- if ("to" %in% names(node_info)) {
-    node_info$to
+  # Get the taxonomic group name, handling both pure taxonomic and hybrid nodes
+  taxonomic_name <- NULL
+  
+  if ("to" %in% names(node_info)) {
+    raw_name <- node_info$to
   } else if ("Child" %in% names(node_info)) {
-    node_info$Child
+    raw_name <- node_info$Child
+  } else if ("Name" %in% names(node_info)) {
+    raw_name <- node_info$Name
   } else {
     return(node_info)  # Return unchanged if no name found
+  }
+  
+  # Extract taxonomic name from hybrid nodes like "Spermatophyta (352.2 Mya)"
+  if (grepl("\\([0-9]+\\.[0-9]+\\s*Mya\\)", raw_name)) {
+    # Extract just the taxonomic part before the age
+    taxonomic_name <- sub("\\s*\\([0-9]+\\.[0-9]+\\s*Mya\\)$", "", raw_name)
+    taxonomic_name <- trimws(taxonomic_name)
+  } else {
+    taxonomic_name <- raw_name
+  }
+  
+  # Skip if it's a generic ancestor name
+  if (is.null(taxonomic_name) || 
+      grepl("^(Ancestor|Node)\\s+[A-Z]$", taxonomic_name) || 
+      grepl("^Common ancestor", taxonomic_name) ||
+      nchar(trimws(taxonomic_name)) <= 2) {
+    return(node_info)
   }
   
   # Try to fetch Wikipedia data using the existing Wikipedia API function
@@ -556,6 +845,30 @@ add_wikipedia_data <- function(node_info) {
   }, error = function(e) {
     # If there's an error, just don't add Wikipedia data
     cat("Warning: Could not fetch Wikipedia data for", taxonomic_name, ":", e$message, "\n")
+  })
+  
+  # Try to fetch silhouette data using PhyloPic
+  tryCatch({
+    # Check if phylopic function exists
+    if (exists("get_silhouette_data")) {
+      silhouette_result <- get_silhouette_data(taxonomic_name)
+      
+      if (silhouette_result$success) {
+        # Format the silhouette HTML and add to node_info
+        silhouette_html <- format_silhouette_html(silhouette_result)
+        node_info$silhouette_html <- silhouette_html
+        node_info$silhouette_uuid <- silhouette_result$uuid
+        node_info$silhouette_attribution <- silhouette_result$attribution
+      } else {
+        # Add empty silhouette data to indicate we tried but failed
+        node_info$silhouette_html <- NULL
+        node_info$silhouette_uuid <- NULL
+        node_info$silhouette_attribution <- NULL
+      }
+    }
+  }, error = function(e) {
+    # If there's an error, just don't add silhouette data
+    cat("Warning: Could not fetch silhouette data for", taxonomic_name, ":", e$message, "\n")
   })
   
   return(node_info)
@@ -585,10 +898,8 @@ get_confidence_stars <- function(age_source) {
 #' @param age_source The source of age data
 #' @return Formatted source text
 format_age_source <- function(age_source) {
-  if (is.null(age_source) || is.na(age_source)) {
-    return("Source: Unknown")
-  }
-  return(paste("Source:", age_source))
+  # Sources are now cited on the frontend about page, no need to show here
+  return("")
 }
 
 #' Get geological period for a given age

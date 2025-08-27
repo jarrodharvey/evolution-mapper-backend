@@ -67,9 +67,15 @@ create_info_panel_data_js <- function(network_data) {
 #' @return Enhanced HTML with CSS and JavaScript for info panel system
 enhance_tree_html_with_info_panels <- function(tree_html, network_data) {
   
-  # Add only layout CSS (remove old info panel CSS that creates blue boxes)
+  # Add layout CSS and info panel CSS
   layout_css <- "<style>body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; } html { margin: 0 !important; padding: 0 !important; } #htmlwidget_container { margin: 0 !important; padding: 0 !important; }</style>"
-  tree_html <- gsub("</head>", paste0(layout_css, "</head>"), tree_html)
+  
+  # Generate info panel CSS with the text wrapping improvements
+  info_panel_css <- paste0("<style>", generate_info_panel_css(), "</style>")
+  
+  # Combine both CSS sections
+  combined_css <- paste0(layout_css, info_panel_css)
+  tree_html <- gsub("</head>", paste0(combined_css, "</head>"), tree_html)
   
   # Create JavaScript data structure with info panel mappings
   info_panel_data_js <- create_info_panel_data_js(network_data)
