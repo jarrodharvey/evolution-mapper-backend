@@ -12,6 +12,7 @@ library(dplyr)
 library(parallel)
 
 source("functions/rotl_tree_generation.R")
+source("functions/datelife_tree_generation.R")  # For optimized DateLife functions
 source("functions/color_config.R")
 
 #' Clean scientific names by removing parenthetical addendums
@@ -115,6 +116,7 @@ generate_hybrid_tree_html <- function(common_names, scientific_names) {
           })
         } else if (task_info$task == "datelife") {
           tryCatch({
+            # Use original DateLife function in parallel worker (simpler and more reliable)
             datelife_result <- get_datelife_result(input = task_info$data, get_spp_from_taxon = FALSE, reference_taxonomy = 'opentree')
             return(list(success = TRUE, result = datelife_result, task = "datelife"))
           }, error = function(e) {
