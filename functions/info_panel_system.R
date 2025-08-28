@@ -189,35 +189,69 @@ format_combined_taxonomic_section <- function(node_data) {
                    !is.na(node_data$wikipedia_summary) && 
                    nchar(as.character(node_data$wikipedia_summary)) > 0
   
-  if (!has_silhouette && !has_wikipedia) {
+  has_silhouette_error <- !is.null(node_data$silhouette_error) && 
+                         !is.na(node_data$silhouette_error) && 
+                         nchar(as.character(node_data$silhouette_error)) > 0
+  
+  has_wikipedia_error <- !is.null(node_data$wikipedia_error) && 
+                        !is.na(node_data$wikipedia_error) && 
+                        nchar(as.character(node_data$wikipedia_error)) > 0
+  
+  # Show section if we have data OR errors to display
+  if (!has_silhouette && !has_wikipedia && !has_silhouette_error && !has_wikipedia_error) {
     return("")
   }
   
   # Start the combined section
   combined_html <- '<div class="taxonomic-combined-section">'
   
-  if (has_silhouette && has_wikipedia) {
-    # Both silhouette and Wikipedia - silhouette floated left with text wrapping
+  # Prepare silhouette content (data or error)
+  silhouette_content <- ""
+  if (has_silhouette) {
+    silhouette_content <- node_data$silhouette_html
+  } else if (has_silhouette_error) {
+    silhouette_content <- paste0(
+      '<div class="silhouette-error" style="color: #e74c3c; font-size: 12px; font-style: italic; padding: 8px; border: 1px solid #e74c3c; border-radius: 4px; background-color: #fdf2f2;">',
+      '⚠️ ', node_data$silhouette_error,
+      '</div>'
+    )
+  }
+  
+  # Prepare Wikipedia content (data or error)  
+  wikipedia_content <- ""
+  if (has_wikipedia) {
+    wikipedia_content <- format_wikipedia_content(node_data)
+  } else if (has_wikipedia_error) {
+    wikipedia_content <- paste0(
+      '<div class="wikipedia-error" style="color: #e74c3c; font-size: 12px; font-style: italic; padding: 8px; border: 1px solid #e74c3c; border-radius: 4px; background-color: #fdf2f2;">',
+      '⚠️ ', node_data$wikipedia_error,
+      '</div>'
+    )
+  }
+  
+  # Combine content based on what we have
+  if ((has_silhouette || has_silhouette_error) && (has_wikipedia || has_wikipedia_error)) {
+    # Both sections - silhouette floated left with text wrapping
     combined_html <- paste0(combined_html,
       '<div class="taxonomic-wrapped-container">',
       '<div class="silhouette-float">',
-      node_data$silhouette_html,
+      silhouette_content,
       '</div>',
-      format_wikipedia_content(node_data),
+      wikipedia_content,
       '</div>'
     )
-  } else if (has_silhouette) {
-    # Only silhouette
+  } else if (has_silhouette || has_silhouette_error) {
+    # Only silhouette (data or error)
     combined_html <- paste0(combined_html,
       '<div class="silhouette-only">',
-      node_data$silhouette_html,
+      silhouette_content,
       '</div>'
     )
-  } else if (has_wikipedia) {
-    # Only Wikipedia
+  } else if (has_wikipedia || has_wikipedia_error) {
+    # Only Wikipedia (data or error)
     combined_html <- paste0(combined_html,
       '<div class="wikipedia-only">',
-      format_wikipedia_content(node_data),
+      wikipedia_content,
       '</div>'
     )
   }
@@ -255,6 +289,10 @@ format_wikipedia_section <- function(node_data) {
                    !is.na(node_data$wikipedia_summary) && 
                    nchar(as.character(node_data$wikipedia_summary)) > 0
   
+  has_wikipedia_error <- !is.null(node_data$wikipedia_error) && 
+                        !is.na(node_data$wikipedia_error) && 
+                        nchar(as.character(node_data$wikipedia_error)) > 0
+  
   if (has_wikipedia) {
     # Display Wikipedia content
     wikipedia_html <- paste0(
@@ -267,12 +305,23 @@ format_wikipedia_section <- function(node_data) {
       '</div>',
       '</div>'
     )
-  } else {
-    # Show message that Wikipedia data is not available
+  } else if (has_wikipedia_error) {
+    # Show specific error message
     wikipedia_html <- paste0(
       '<div class="wikipedia-section">',
       '<div class="wikipedia-content">',
-      '<p class="wikipedia-error" style="color: #95a5a6; font-size: 13px; font-style: italic;">',
+      '<div class="wikipedia-error" style="color: #e74c3c; font-size: 12px; font-style: italic; padding: 8px; border: 1px solid #e74c3c; border-radius: 4px; background-color: #fdf2f2;">',
+      '⚠️ ', node_data$wikipedia_error,
+      '</div>',
+      '</div>',
+      '</div>'
+    )
+  } else {
+    # Show generic message that Wikipedia data is not available
+    wikipedia_html <- paste0(
+      '<div class="wikipedia-section">',
+      '<div class="wikipedia-content">',
+      '<p class="wikipedia-unavailable" style="color: #95a5a6; font-size: 13px; font-style: italic;">',
       'Wikipedia information not available for this taxonomic group',
       '</p>',
       '</div>',
@@ -983,16 +1032,22 @@ add_wikipedia_data <- function(node_info) {
         node_info$wikipedia_summary <- wikipedia_result$introduction
         node_info$wikipedia_url <- wikipedia_result$url
         node_info$wikipedia_title <- wikipedia_result$wikipedia_title
+        node_info$wikipedia_error <- NULL
       } else {
-        # Add empty Wikipedia data to indicate we tried but failed
+        # Add failure information to show in info panel
         node_info$wikipedia_summary <- NULL
         node_info$wikipedia_url <- NULL
         node_info$wikipedia_title <- NULL
+        node_info$wikipedia_error <- paste("Failed to fetch Wikipedia data:", wikipedia_result$error)
       }
     }
   }, error = function(e) {
-    # If there's an error, just don't add Wikipedia data
+    # If there's an error, add error information
     cat("Warning: Could not fetch Wikipedia data for", taxonomic_name, ":", e$message, "\n")
+    node_info$wikipedia_summary <- NULL
+    node_info$wikipedia_url <- NULL
+    node_info$wikipedia_title <- NULL
+    node_info$wikipedia_error <- paste("Failed to connect to Wikipedia API:", e$message)
   })
   
   # Try to fetch silhouette data using PhyloPic
@@ -1007,16 +1062,22 @@ add_wikipedia_data <- function(node_info) {
         node_info$silhouette_html <- silhouette_html
         node_info$silhouette_uuid <- silhouette_result$uuid
         node_info$silhouette_attribution <- silhouette_result$attribution
+        node_info$silhouette_error <- NULL
       } else {
-        # Add empty silhouette data to indicate we tried but failed
+        # Add failure information to show in info panel
         node_info$silhouette_html <- NULL
         node_info$silhouette_uuid <- NULL
         node_info$silhouette_attribution <- NULL
+        node_info$silhouette_error <- paste("Failed to fetch silhouette:", silhouette_result$error)
       }
     }
   }, error = function(e) {
-    # If there's an error, just don't add silhouette data
+    # If there's an error, add error information
     cat("Warning: Could not fetch silhouette data for", taxonomic_name, ":", e$message, "\n")
+    node_info$silhouette_html <- NULL
+    node_info$silhouette_uuid <- NULL
+    node_info$silhouette_attribution <- NULL
+    node_info$silhouette_error <- paste("Failed to connect to PhyloPic API:", e$message)
   })
   
   return(node_info)

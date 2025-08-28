@@ -139,6 +139,41 @@ EVOLUTION_API_KEYS=your-key-1,your-key-2,your-key-3
 - `research-key-67890` 
 - `dev-key-abcde`
 
+### Fix SSL Issues (macOS)
+
+If you encounter SSL connection errors like "SSL connect error: Connection reset by peer" after updating R packages, the R curl package may need to be recompiled against system libraries:
+
+```r
+# In R console:
+options(repos = c(CRAN = 'https://cloud.r-project.org/'))
+
+# Remove existing curl package
+remove.packages('curl')
+
+# Set environment variables to force system library usage
+Sys.setenv(
+  'INCLUDE_DIR' = '/opt/homebrew/include',  # For Apple Silicon Macs
+  'LIB_DIR' = '/opt/homebrew/lib',          # For Intel Macs use /usr/local/...
+  'AUTOBREW' = '0',
+  'FORCE_AUTOBREW' = '0',
+  'DISABLE_AUTOBREW' = '1'
+)
+
+# Reinstall curl from source with system libraries
+install.packages('curl', type = 'source', 
+                 configure.args = '--with-curl-config=/opt/homebrew/bin/curl-config')
+
+# Test the fix
+library(httr)
+GET('https://en.wikipedia.org/api/rest_v1/page/summary/test')  # Should return 200
+```
+
+**Requirements:**
+- Homebrew curl and OpenSSL: `brew install curl openssl`
+- Look for "Found INCLUDE_DIR and/or LIB_DIR!" and "Using PKG_LIBS=-L/opt/homebrew/lib -lcurl" in output
+
+This ensures R curl uses the same SSL libraries as system curl, fixing compatibility issues.
+
 ### Start Server
 
 ```r

@@ -415,42 +415,52 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
     }
   }
   
-  # Process each edge in the ROTL tree
+  # First pass: collect all unique parent and child nodes with their age information
+  # This ensures that parent nodes (including root) get their age data processed
+  all_parent_nums <- unique(phylo_tree$edge[, 1])
+  all_child_nums <- unique(phylo_tree$edge[, 2])
+  all_node_nums <- unique(c(all_parent_nums, all_child_nums))
+  
+  # Pre-calculate age information for all nodes to avoid missing root nodes
+  node_age_cache <- list()
+  node_type_cache <- list()
+  node_label_cache <- list()
+  
+  for (node_num in all_node_nums) {
+    # Determine node type
+    node_type <- if (node_num <= n_tips) "species" else {
+      internal_index <- node_num - n_tips
+      if (!is.null(phylo_tree$node.label) && 
+          length(phylo_tree$node.label) >= internal_index && 
+          !is.na(phylo_tree$node.label[internal_index]) && 
+          !grepl("^[Mm]rcaott\\d+ott\\d+", phylo_tree$node.label[internal_index])) {
+        "taxonomic"
+      } else {
+        "ancestor"
+      }
+    }
+    
+    # Get age information and label
+    node_age_result <- get_age_info(node_num, node_type)
+    node_label <- get_node_label_with_age(node_num, node_type)
+    
+    # Cache the results
+    node_age_cache[[as.character(node_num)]] <- node_age_result
+    node_type_cache[[as.character(node_num)]] <- node_type
+    node_label_cache[[as.character(node_num)]] <- node_label
+  }
+  
+  # Process each edge in the ROTL tree using cached data
   for (i in 1:nrow(phylo_tree$edge)) {
     parent_num <- phylo_tree$edge[i, 1]
     child_num <- phylo_tree$edge[i, 2]
     
-    # Determine node types
-    parent_type <- if (parent_num <= n_tips) "species" else {
-      internal_index <- parent_num - n_tips
-      if (!is.null(phylo_tree$node.label) && 
-          length(phylo_tree$node.label) >= internal_index && 
-          !is.na(phylo_tree$node.label[internal_index]) && 
-          !grepl("^[Mm]rcaott\\d+ott\\d+", phylo_tree$node.label[internal_index])) {
-        "taxonomic"
-      } else {
-        "ancestor"
-      }
-    }
-    
-    child_type <- if (child_num <= n_tips) "species" else {
-      internal_index <- child_num - n_tips
-      if (!is.null(phylo_tree$node.label) && 
-          length(phylo_tree$node.label) >= internal_index && 
-          !is.na(phylo_tree$node.label[internal_index]) && 
-          !grepl("^[Mm]rcaott\\d+ott\\d+", phylo_tree$node.label[internal_index])) {
-        "taxonomic"
-      } else {
-        "ancestor"
-      }
-    }
-    
-    # Get labels with age information
-    parent_label <- get_node_label_with_age(parent_num, parent_type)
-    child_label <- get_node_label_with_age(child_num, child_type)
-    
-    # Get age information
-    child_age_result <- get_age_info(child_num, child_type)
+    # Get cached information
+    parent_type <- node_type_cache[[as.character(parent_num)]]
+    child_type <- node_type_cache[[as.character(child_num)]]
+    parent_label <- node_label_cache[[as.character(parent_num)]]
+    child_label <- node_label_cache[[as.character(child_num)]]
+    child_age_result <- node_age_cache[[as.character(child_num)]]
     
     # Add edge to network
     network_data <- rbind(network_data, data.frame(
@@ -463,7 +473,7 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
     ))
   }
   
-  # Add root handling (same as ROTL approach)
+  # Add root handling - find orphaned parents and connect them to conceptual root
   if (nrow(network_data) > 0) {
     all_parents <- unique(network_data$from)
     all_children <- unique(network_data$to)
@@ -473,18 +483,40 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
     
     if (length(orphaned_parents) > 0) {
       for (orphaned_parent in orphaned_parents) {
+        # Determine node type
         if (grepl("^Ancestor [A-Z]", orphaned_parent)) {
           node_type <- "ancestor"
         } else {
           node_type <- "taxonomic"
         }
         
+        # Find the original node number for this orphaned parent to get its cached age data
+        # We need to reverse-lookup from the cached labels to find the node number
+        orphaned_parent_node_num <- NULL
+        for (node_num_str in names(node_label_cache)) {
+          if (node_label_cache[[node_num_str]] == orphaned_parent) {
+            orphaned_parent_node_num <- as.numeric(node_num_str)
+            break
+          }
+        }
+        
+        # Get age information from cache if available
+        if (!is.null(orphaned_parent_node_num) && as.character(orphaned_parent_node_num) %in% names(node_age_cache)) {
+          age_result <- node_age_cache[[as.character(orphaned_parent_node_num)]]
+          age_info <- age_result$info
+          has_age <- age_result$has_age
+        } else {
+          # Fallback to default values if cache lookup fails
+          age_info <- "age unavailable"
+          has_age <- FALSE
+        }
+        
         network_data <- rbind(data.frame(
           from = root_name,
           to = orphaned_parent,
           NodeType = node_type,
-          AgeInfo = "age unavailable",
-          HasAge = FALSE,
+          AgeInfo = age_info,
+          HasAge = has_age,
           stringsAsFactors = FALSE
         ), network_data)
       }
@@ -531,12 +563,13 @@ transform_hybrid_to_info_panel_format <- function(network_data) {
     return(NA_real_)
   })
   
-  # Set validation fields based on HasAge
-  info_panel_data$AgeValid <- network_data$HasAge
-  info_panel_data$AgeSource <- ifelse(network_data$HasAge, 
+  # Set validation fields based on whether we actually extracted a numeric age
+  # This fixes the bug where nodes with age data in their labels were marked as invalid
+  info_panel_data$AgeValid <- !is.na(info_panel_data$Age) & is.numeric(info_panel_data$Age)
+  info_panel_data$AgeSource <- ifelse(!is.na(info_panel_data$Age) & is.numeric(info_panel_data$Age), 
                                       "DateLife chronogram database (hybrid tree)",
                                       "Age data unavailable")
-  info_panel_data$ValidationNotes <- ifelse(network_data$HasAge,
+  info_panel_data$ValidationNotes <- ifelse(!is.na(info_panel_data$Age) & is.numeric(info_panel_data$Age),
                                             NA_character_,
                                             NA_character_)
   
