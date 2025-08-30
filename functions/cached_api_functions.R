@@ -6,26 +6,103 @@ source("functions/caching_config.R")
 source("functions/wikipedia_api.R")
 source("functions/phylopic_silhouettes.R")
 
-# Memoised Wikipedia functions
+# Create memoised functions without logging first
+memoised_get_wikipedia_intro <- memoise(get_wikipedia_intro, cache = wikipedia_cache)
+memoised_search_wikipedia_article <- memoise(search_wikipedia_article, cache = wikipedia_cache)
+memoised_get_wikipedia_extract <- memoise(get_wikipedia_extract, cache = wikipedia_cache)
+memoised_get_silhouette_data <- memoise(get_silhouette_data, cache = phylopic_cache)
+memoised_get_random_silhouette_uuid <- memoise(get_random_silhouette_uuid, cache = phylopic_cache)
+
+# Wikipedia functions with cache hit/miss logging
 #
-# Cache the main get_wikipedia_intro function that combines search and extract
-# This is the main entry point used by info panel system
-cached_get_wikipedia_intro <- memoise(get_wikipedia_intro, cache = wikipedia_cache)
+# Main Wikipedia function with cache logging
+cached_get_wikipedia_intro <- function(taxonomic_group, truncate_length = 300) {
+  # Check if data is already cached by trying to get cache stats before and after
+  cache_stats_before <- wikipedia_cache$size()
+  
+  api_log_info(paste("Wikipedia Cache lookup for", taxonomic_group))
+  result <- memoised_get_wikipedia_intro(taxonomic_group, truncate_length)
+  
+  cache_stats_after <- wikipedia_cache$size()
+  
+  if (cache_stats_after > cache_stats_before) {
+    api_log_info(paste("Wikipedia Cache MISS - fetched from API for", taxonomic_group))
+  } else {
+    api_log_info(paste("Wikipedia Cache HIT - using cached data for", taxonomic_group))
+  }
+  
+  return(result)
+}
 
-# Cache the Wikipedia search function separately in case it's called directly
-cached_search_wikipedia_article <- memoise(search_wikipedia_article, cache = wikipedia_cache)
+# Wikipedia search function with cache logging
+cached_search_wikipedia_article <- function(taxonomic_group) {
+  cache_stats_before <- wikipedia_cache$size()
+  
+  result <- memoised_search_wikipedia_article(taxonomic_group)
+  
+  cache_stats_after <- wikipedia_cache$size()
+  
+  if (cache_stats_after > cache_stats_before) {
+    api_log_info(paste("Wikipedia Search Cache MISS - fetched from API for", taxonomic_group))
+  } else {
+    api_log_info(paste("Wikipedia Search Cache HIT - using cached data for", taxonomic_group))
+  }
+  
+  return(result)
+}
 
-# Cache the Wikipedia extract function separately in case it's called directly  
-cached_get_wikipedia_extract <- memoise(get_wikipedia_extract, cache = wikipedia_cache)
+# Wikipedia extract function with cache logging
+cached_get_wikipedia_extract <- function(page_id, truncate_length = 300) {
+  cache_stats_before <- wikipedia_cache$size()
+  
+  result <- memoised_get_wikipedia_extract(page_id, truncate_length)
+  
+  cache_stats_after <- wikipedia_cache$size()
+  
+  if (cache_stats_after > cache_stats_before) {
+    api_log_info(paste("Wikipedia Extract Cache MISS - fetched from API for page", page_id))
+  } else {
+    api_log_info(paste("Wikipedia Extract Cache HIT - using cached data for page", page_id))
+  }
+  
+  return(result)
+}
 
-# Memoised PhyloPic functions
+# PhyloPic functions with cache hit/miss logging
 #
-# Cache the main get_silhouette_data function that gets image and attribution
-# This is the main entry point used by info panel system
-cached_get_silhouette_data <- memoise(get_silhouette_data, cache = phylopic_cache)
+# Main PhyloPic function with cache logging
+cached_get_silhouette_data <- function(taxonomic_name) {
+  cache_stats_before <- phylopic_cache$size()
+  
+  result <- memoised_get_silhouette_data(taxonomic_name)
+  
+  cache_stats_after <- phylopic_cache$size()
+  
+  if (cache_stats_after > cache_stats_before) {
+    api_log_info(paste("PhyloPic Cache MISS - fetched from API for", taxonomic_name))
+  } else {
+    api_log_info(paste("PhyloPic Cache HIT - using cached silhouette for", taxonomic_name))
+  }
+  
+  return(result)
+}
 
-# Cache the UUID lookup function separately
-cached_get_random_silhouette_uuid <- memoise(get_random_silhouette_uuid, cache = phylopic_cache)
+# PhyloPic UUID function with cache logging
+cached_get_random_silhouette_uuid <- function(taxonomic_name) {
+  cache_stats_before <- phylopic_cache$size()
+  
+  result <- memoised_get_random_silhouette_uuid(taxonomic_name)
+  
+  cache_stats_after <- phylopic_cache$size()
+  
+  if (cache_stats_after > cache_stats_before) {
+    api_log_info(paste("PhyloPic UUID Cache MISS - fetched from API for", taxonomic_name))
+  } else {
+    api_log_info(paste("PhyloPic UUID Cache HIT - using cached UUID for", taxonomic_name))
+  }
+  
+  return(result)
+}
 
 # Note: Info panel generation functions are cached within info_panel_system.R
 # to avoid circular dependencies. The core API functions above provide the 
