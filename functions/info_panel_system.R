@@ -11,6 +11,9 @@ source("functions/phylopic_silhouettes.R")
 # Load parallel processing library
 library(parallel)
 
+# Source shared logging configuration
+source("functions/logging_config.R")
+
 
 
 # Generate info panel HTML for ancestor nodes
@@ -166,12 +169,12 @@ has_extractable_taxonomic_name <- function(node_data) {
   if ("Name" %in% names(node_data) && !is.null(node_data$Name) && !is.na(node_data$Name)) {
     node_name <- as.character(node_data$Name)
     # Extract taxonomic name from hybrid format like "GroupName (age Mya)"
-    taxonomic_match <- regmatches(node_name, regexpr("^([A-Za-z][A-Za-z ]+?)\\s*\\([0-9]+\\.[0-9]+\\s*Mya\\)$", node_name, perl = TRUE))
+    taxonomic_match <- regmatches(node_name, regexpr("^([A-Za-z][A-Za-z ]+?)\\.*\\.[0-9]+\\.[0-9]+\\.*Mya\\.$", node_name, perl = TRUE))
     if (length(taxonomic_match) > 0) {
       # Extract just the taxonomic part before the age
-      taxonomic_name <- sub("\\s*\\([0-9]+\\.[0-9]+\\s*Mya\\)$", "", node_name)
+      taxonomic_name <- sub("\\.*\\.[0-9.]+\\.*Mya\\.$", "", node_name)
       # Check if it's not a generic ancestor name
-      return(!grepl("^(Ancestor|Node)\\s+[A-Z]$", taxonomic_name) && 
+      return(!grepl("^(Ancestor|Node)\\.+[A-Z]$", taxonomic_name) && 
              !grepl("^Common ancestor", taxonomic_name) &&
              nchar(trimws(taxonomic_name)) > 2)
     }
@@ -817,17 +820,29 @@ console.log("Info panel system initialized with server-side Wikipedia integratio
 
 # Create info panel data for network
 # Parallel version of create_info_panel_data for improved performance
-create_info_panel_data_parallel <- function(network_data) {
+create_info_panel_data_parallel <- function(network_data, request_id = NULL) {
+  if (is.null(request_id)) {
+    request_id <- "info_panel"
+  }
+  
+  api_log_info(paste("[", request_id, "] Starting info panel data creation...", sep=""))
+  start_time <- Sys.time()
+  
   # Handle both naming conventions: "to" (ROTL) and "Child" (DateLife)
   if (!("to" %in% names(network_data)) && !("Child" %in% names(network_data))) {
+    api_log_warn(paste("[", request_id, "] No valid node naming convention found in network data", sep=""))
     return(rep("", nrow(network_data)))
   }
   
   info_panel_data <- character(nrow(network_data))
+  total_nodes <- nrow(network_data)
+  
+  api_log_info(paste("[", request_id, "] Processing", total_nodes, "nodes for info panel creation..."))
   
   # Identify nodes that need taxonomic content (Wikipedia + PhyloPic data)
   taxonomic_indices <- c()
   taxonomic_node_info <- list()
+  species_count <- 0
   
   for (i in 1:nrow(network_data)) {
     node_info <- as.list(network_data[i, ])
@@ -835,6 +850,7 @@ create_info_panel_data_parallel <- function(network_data) {
     # Only show info panels for ancestor nodes (not species)
     if ("NodeType" %in% names(node_info) && node_info$NodeType == "species") {
       info_panel_data[i] <- ""  # No info panel for species
+      species_count <- species_count + 1
     } else {
       # Check if this node needs taxonomic content
       if (should_add_taxonomic_content(node_info)) {
@@ -847,14 +863,25 @@ create_info_panel_data_parallel <- function(network_data) {
     }
   }
   
+  ancestor_nodes <- total_nodes - species_count
+  taxonomic_nodes <- length(taxonomic_indices)
+  non_taxonomic_ancestors <- ancestor_nodes - taxonomic_nodes
+  
+  api_log_info(paste("[", request_id, "] Node classification:", species_count, "species,", ancestor_nodes, "ancestors (", taxonomic_nodes, "taxonomic,", non_taxonomic_ancestors, "non-taxonomic)"))
+  
   # If we have taxonomic nodes, process them in parallel
   if (length(taxonomic_indices) > 0) {
-    cat("Processing", length(taxonomic_indices), "taxonomic nodes in parallel...\n")
+    api_log_info(paste("[", request_id, "] Processing", length(taxonomic_indices), "taxonomic nodes in parallel (Wikipedia + PhyloPic data)..."))
     
+    parallel_start <- Sys.time()
     # Create parallel cluster
-    cl <- makeCluster(min(length(taxonomic_indices), 4))  # Use at most 4 cores
+    num_cores <- min(length(taxonomic_indices), 4)
+    api_log_info(paste("[", request_id, "] Creating parallel cluster with", num_cores, "cores..."))
+    cl <- makeCluster(num_cores)
     
     # Export necessary functions and libraries to cluster nodes
+    api_log_info(paste("[", request_id, "] Setting up cluster workers...", sep=""))
+    cluster_setup_start <- Sys.time()
     clusterEvalQ(cl, {
       library(httr)
       library(rphylopic)
@@ -872,7 +899,11 @@ create_info_panel_data_parallel <- function(network_data) {
       "extract_taxonomic_name"
     ), envir = environment())
     
+    cluster_setup_duration <- as.numeric(difftime(Sys.time(), cluster_setup_start, units = "secs"))
+    api_log_info(paste("[", request_id, "] Cluster setup completed - Duration:", round(cluster_setup_duration, 3), "s"))
+    
     # Process taxonomic nodes in parallel
+    api_log_info(paste("[", request_id, "] Launching parallel Wikipedia and PhyloPic queries...", sep=""))
     parallel_results <- tryCatch({
       parLapply(cl, taxonomic_node_info, function(item) {
         node_info <- item$node_info
@@ -882,11 +913,14 @@ create_info_panel_data_parallel <- function(network_data) {
         
         # Skip if it's a generic ancestor name
         if (is.null(taxonomic_name) || 
-            grepl("^(Ancestor|Node)\\s+[A-Z]$", taxonomic_name) || 
+            grepl("^(Ancestor|Node)\\.+[A-Z]$", taxonomic_name) || 
             grepl("^Common ancestor", taxonomic_name) ||
             nchar(trimws(taxonomic_name)) <= 2) {
-          return(list(index = item$index, node_info = node_info))
+          return(list(index = item$index, node_info = node_info, taxonomic_name = NULL))
         }
+        
+        wikipedia_success <- FALSE
+        phylopic_success <- FALSE
         
         # Fetch Wikipedia and PhyloPic data sequentially within each parallel worker
         # (simpler than nested parallelization, still faster overall since nodes are processed in parallel)
@@ -899,6 +933,7 @@ create_info_panel_data_parallel <- function(network_data) {
               node_info$wikipedia_summary <- wikipedia_result$introduction
               node_info$wikipedia_url <- wikipedia_result$url
               node_info$wikipedia_title <- wikipedia_result$wikipedia_title
+              wikipedia_success <- TRUE
             }
           }
         }, error = function(e) {
@@ -914,25 +949,57 @@ create_info_panel_data_parallel <- function(network_data) {
               node_info$silhouette_html <- silhouette_html
               node_info$silhouette_uuid <- silhouette_result$uuid
               node_info$silhouette_attribution <- silhouette_result$attribution
+              phylopic_success <- TRUE
             }
           }
         }, error = function(e) {
           # If there's an error, just don't add silhouette data
         })
         
-        return(list(index = item$index, node_info = node_info))
+        return(list(
+          index = item$index, 
+          node_info = node_info, 
+          taxonomic_name = taxonomic_name,
+          wikipedia_success = wikipedia_success,
+          phylopic_success = phylopic_success
+        ))
       })
     }, finally = {
       stopCluster(cl)
     })
     
-    # Apply the parallel results back to info_panel_data
+    parallel_duration <- as.numeric(difftime(Sys.time(), parallel_start, units = "secs"))
+    api_log_info(paste("[", request_id, "] Parallel processing completed - Duration:", round(parallel_duration, 3), "s"))
+    
+    # Apply the parallel results back to info_panel_data and collect stats
+    wikipedia_successes <- 0
+    phylopic_successes <- 0
+    processed_taxonomic_names <- c()
+    
     for (result in parallel_results) {
       info_panel_data[result$index] <- format_panel_content(result$node_info)
+      
+      if (!is.null(result$taxonomic_name)) {
+        processed_taxonomic_names <- c(processed_taxonomic_names, result$taxonomic_name)
+        if (result$wikipedia_success) wikipedia_successes <- wikipedia_successes + 1
+        if (result$phylopic_success) phylopic_successes <- phylopic_successes + 1
+      }
     }
     
-    cat("Completed parallel processing of taxonomic nodes\n")
+    api_log_info(paste("[", request_id, "] Parallel processing results:", sep=""))
+    api_log_info(paste("[", request_id, "]   Taxonomic names processed:", length(processed_taxonomic_names)))
+    api_log_info(paste("[", request_id, "]   Wikipedia successes:", wikipedia_successes, "/", length(processed_taxonomic_names)))
+    api_log_info(paste("[", request_id, "]   PhyloPic successes:", phylopic_successes, "/", length(processed_taxonomic_names)))
+    
+    if (length(processed_taxonomic_names) > 0) {
+      api_log_info(paste("[", request_id, "]   Processed taxonomic groups:", paste(head(processed_taxonomic_names, 3), collapse = ', '), if(length(processed_taxonomic_names) > 3) '...' else '', sep=" "))
+    }
+  } else {
+    api_log_info(paste("[", request_id, "] No taxonomic nodes requiring external data - skipping parallel processing", sep=""))
   }
+  
+  total_duration <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+  api_log_info(paste("[", request_id, "] Info panel creation completed - Total Duration:", round(total_duration, 3), "s"))
   
   return(info_panel_data)
 }
@@ -950,9 +1017,9 @@ extract_taxonomic_name <- function(node_info) {
   }
   
   # Extract taxonomic name from hybrid nodes like "Spermatophyta (352.2 Mya)"
-  if (grepl("\\([0-9]+\\.[0-9]+\\s*Mya\\)", raw_name)) {
+  if (grepl("\\.[0-9]+\\.[0-9]+\\.*Mya\\.", raw_name)) {
     # Extract just the taxonomic part before the age
-    taxonomic_name <- sub("\\s*\\([0-9]+\\.[0-9]+\\s*Mya\\)$", "", raw_name)
+    taxonomic_name <- sub("\\.*\\.[0-9]+\\.[0-9]+\\.*Mya\\.$", "", raw_name)
     taxonomic_name <- trimws(taxonomic_name)
   } else {
     taxonomic_name <- raw_name
@@ -1005,9 +1072,9 @@ add_wikipedia_data <- function(node_info) {
   }
   
   # Extract taxonomic name from hybrid nodes like "Spermatophyta (352.2 Mya)"
-  if (grepl("\\([0-9]+\\.[0-9]+\\s*Mya\\)", raw_name)) {
+  if (grepl("\\.[0-9]+\\.[0-9]+\\.*Mya\\.", raw_name)) {
     # Extract just the taxonomic part before the age
-    taxonomic_name <- sub("\\s*\\([0-9]+\\.[0-9]+\\s*Mya\\)$", "", raw_name)
+    taxonomic_name <- sub("\\.*\\.[0-9]+\\.[0-9]+\\.*Mya\\.$", "", raw_name)
     taxonomic_name <- trimws(taxonomic_name)
   } else {
     taxonomic_name <- raw_name
@@ -1015,7 +1082,7 @@ add_wikipedia_data <- function(node_info) {
   
   # Skip if it's a generic ancestor name
   if (is.null(taxonomic_name) || 
-      grepl("^(Ancestor|Node)\\s+[A-Z]$", taxonomic_name) || 
+      grepl("^(Ancestor|Node)\\.+[A-Z]$", taxonomic_name) || 
       grepl("^Common ancestor", taxonomic_name) ||
       nchar(trimws(taxonomic_name)) <= 2) {
     return(node_info)

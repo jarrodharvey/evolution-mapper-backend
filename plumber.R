@@ -28,6 +28,9 @@ function(req, res) {
   forward()
 }
 
+# Source logging configuration first
+source("functions/logging_config.R")
+
 # Source tree generation functions
 source("functions/rotl_tree_generation.R")
 source("functions/datelife_tree_generation.R")
@@ -582,7 +585,19 @@ function(req, common_names = NULL, scientific_names = NULL, allow_partial_respon
 #* @param scientific_names A JSON array of species scientific names (must match common_names length)
 #* @post /api/full-tree-dated
 function(req, common_names = NULL, scientific_names = NULL) {
+  request_id <- paste0("req_", format(Sys.time(), "%Y%m%d_%H%M%S_"), sample(1000:9999, 1))
+  
+  api_log_info(paste("=== START POST /api/full-tree-dated [Request ID:", request_id, "] ==="))
+  api_log_info(paste("Request received from IP:", req$REMOTE_ADDR %||% 'unknown'))
+  api_log_info(paste("API Key:", substr(req$api_key %||% 'none', 1, 8), "..."))
+  
+  start_time <- Sys.time()
+  
+  # Input validation logging
+  api_log_info("Validating input parameters...")
   if (is.null(common_names) || is.null(scientific_names)) {
+    api_log_warn(paste("Missing required parameters - common_names:", !is.null(common_names), ", scientific_names:", !is.null(scientific_names)))
+    api_log_info(paste("=== END POST /api/full-tree-dated [Request ID:", request_id, "] - VALIDATION_ERROR - Duration:", round(as.numeric(difftime(Sys.time(), start_time, units = 'secs')), 3), "s ==="))
     return(list(
       success = FALSE,
       error = "Missing required parameters 'common_names' and 'scientific_names'",
@@ -590,11 +605,18 @@ function(req, common_names = NULL, scientific_names = NULL) {
     ))
   }
   
+  api_log_info("Parsing input species lists...")
   # Parse both input parameters using shared function
   common_list <- parse_species_input(common_names)
   scientific_list <- parse_species_input(scientific_names)
   
+  api_log_info(paste("Parsed", length(common_list), "common names and", length(scientific_list), "scientific names"))
+  api_log_info(paste("Common names:", paste(common_list, collapse = ', ')))
+  api_log_info(paste("Scientific names:", paste(scientific_list, collapse = ', ')))
+  
   if (length(common_list) != length(scientific_list)) {
+    api_log_warn(paste("Mismatched array lengths - common:", length(common_list), ", scientific:", length(scientific_list)))
+    api_log_info(paste("=== END POST /api/full-tree-dated [Request ID:", request_id, "] - VALIDATION_ERROR - Duration:", round(as.numeric(difftime(Sys.time(), start_time, units = 'secs')), 3), "s ==="))
     return(list(
       success = FALSE,
       error = "common_names and scientific_names must have the same length"
@@ -602,13 +624,32 @@ function(req, common_names = NULL, scientific_names = NULL) {
   }
   
   if (length(common_list) < 2) {
+    api_log_warn(paste("Insufficient species count:", length(common_list), "(minimum 2 required)"))
+    api_log_info(paste("=== END POST /api/full-tree-dated [Request ID:", request_id, "] - VALIDATION_ERROR - Duration:", round(as.numeric(difftime(Sys.time(), start_time, units = 'secs')), 3), "s ==="))
     return(list(
       success = FALSE,
       error = "At least 2 species required for tree generation"
     ))
   }
   
-  result <- generate_hybrid_tree_html(common_list, scientific_list)
+  api_log_info("Input validation passed - proceeding with hybrid tree generation...")
+  api_log_info(paste("Calling generate_hybrid_tree_html with", length(common_list), "species..."))
+  
+  tree_gen_start <- Sys.time()
+  result <- generate_hybrid_tree_html(common_list, scientific_list, request_id = request_id)
+  tree_gen_duration <- as.numeric(difftime(Sys.time(), tree_gen_start, units = "secs"))
+  
+  total_duration <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+  
+  if (result$success) {
+    api_log_info(paste("Hybrid tree generation SUCCESSFUL - Tree generation:", round(tree_gen_duration, 3), "s"))
+    api_log_info("Response includes: HTML tree, info panels, age data")
+    api_log_info(paste("=== END POST /api/full-tree-dated [Request ID:", request_id, "] - SUCCESS - Total Duration:", round(total_duration, 3), "s ==="))
+  } else {
+    api_log_error(paste("Hybrid tree generation FAILED - Error:", result$error))
+    api_log_info(paste("=== END POST /api/full-tree-dated [Request ID:", request_id, "] - ERROR - Total Duration:", round(total_duration, 3), "s ==="))
+  }
+  
   return(result)
 }
 

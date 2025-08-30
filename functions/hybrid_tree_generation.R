@@ -11,6 +11,9 @@ library(DBI)
 library(dplyr)
 library(parallel)
 
+# Source shared logging configuration
+source("functions/logging_config.R")
+
 source("functions/rotl_tree_generation.R")
 source("functions/datelife_tree_generation.R")  # For optimized DateLife functions
 source("functions/color_config.R")
@@ -47,21 +50,37 @@ calculate_dynamic_link_length_hybrid <- function(network_data, base_length = 100
 #' Generate hybrid tree HTML combining ROTL topology with DateLife ages
 #' @param common_names Vector of common names provided by user
 #' @param scientific_names Vector of scientific names provided by user
+#' @param request_id Optional request ID for logging correlation
 #' @return List with success status and HTML or error message
-generate_hybrid_tree_html <- function(common_names, scientific_names) {
+generate_hybrid_tree_html <- function(common_names, scientific_names, request_id = NULL) {
+  if (is.null(request_id)) {
+    request_id <- paste0("hybrid_", format(Sys.time(), "%H%M%S"))
+  }
+  
   tryCatch({
-    cat("=== GENERATING HYBRID TREE (ROTL + DateLife) ===\n")
+    api_log_info(paste("[", request_id, "] === STARTING HYBRID TREE GENERATION ===", sep=""))
+    api_log_info(paste("[", request_id, "] Input:", length(common_names), "species"))
+    api_log_info(paste("[", request_id, "] Common names:", paste(head(common_names, 5), collapse = ', '), if(length(common_names) > 5) '...' else '', sep=" "))
+    api_log_info(paste("[", request_id, "] Scientific names:", paste(head(scientific_names, 5), collapse = ', '), if(length(scientific_names) > 5) '...' else '', sep=" "))
     
     # Step 1: Get species data and check validity
-    cat("Getting species data from database...\n")
+    step_start <- Sys.time()
+    api_log_info(paste("[", request_id, "] STEP 1: Getting species data from database...", sep=""))
+    
     species_data <- get_species_from_db_paired(common_names, scientific_names)
     valid_species <- species_data[!is.na(species_data$ott), ]
+    
+    step_duration <- as.numeric(difftime(Sys.time(), step_start, units = "secs"))
+    api_log_info(paste("[", request_id, "] Database lookup completed - Found", nrow(valid_species), "/", nrow(species_data), "valid OTT IDs - Duration:", round(step_duration, 3), "s"))
     
     if (nrow(valid_species) < 2) {
       # Find missing species for both OTT ID lookup and consistency with /api/dated-tree format
       missing_indices <- which(is.na(species_data$ott))
       missing_common <- if (length(missing_indices) > 0) species_data$common[missing_indices] else c()
       missing_scientific <- if (length(missing_indices) > 0) species_data$scientific[missing_indices] else c()
+      
+      api_log_error(paste("[", request_id, "] INSUFFICIENT VALID SPECIES - Only", nrow(valid_species), "species with valid OTT IDs (need ≥2)"))
+      api_log_error(paste("[", request_id, "] Missing OTT IDs for:", paste(missing_common, collapse = ', ')))
       
       return(list(
         success = FALSE,
@@ -77,21 +96,32 @@ generate_hybrid_tree_html <- function(common_names, scientific_names) {
     }
     
     # Step 2: Run ROTL and DateLife calls in parallel
-    cat("Running ROTL and DateLife queries in parallel...\n")
+    step_start <- Sys.time()
+    api_log_info(paste("[", request_id, "] STEP 2: Running ROTL and DateLife queries in parallel...", sep=""))
     
     # Clean scientific names for DateLife
     cleaned_scientific_names <- clean_scientific_names(scientific_names)
-    cat("Cleaned scientific names for DateLife query:\n")
+    api_log_info(paste("[", request_id, "] Scientific name cleaning:", sep=""))
+    cleaned_count <- 0
     for (i in seq_along(scientific_names)) {
       if (scientific_names[i] != cleaned_scientific_names[i]) {
-        cat("  ", scientific_names[i], " -> ", cleaned_scientific_names[i], "\n")
+        api_log_info(paste("[", request_id, "]  ", scientific_names[i], " -> ", cleaned_scientific_names[i], sep=""))
+        cleaned_count <- cleaned_count + 1
       }
+    }
+    if (cleaned_count == 0) {
+      api_log_info(paste("[", request_id, "]   No names required cleaning", sep=""))
+    } else {
+      api_log_info(paste("[", request_id, "]   Cleaned", cleaned_count, "scientific names"))
     }
     
     # Create parallel cluster (use 2 cores for the two main API calls)
+    api_log_info(paste("[", request_id, "] Creating parallel cluster for ROTL and DateLife queries...", sep=""))
+    parallel_start <- Sys.time()
     cl <- makeCluster(2)
     
     # Export necessary libraries and data to cluster nodes
+    api_log_info(paste("[", request_id, "] Setting up cluster workers...", sep=""))
     clusterEvalQ(cl, {
       library(rotl)
       library(datelife)
@@ -100,6 +130,10 @@ generate_hybrid_tree_html <- function(common_names, scientific_names) {
     clusterExport(cl, c("valid_species", "cleaned_scientific_names"), envir = environment())
     
     # Define parallel tasks
+    api_log_info(paste("[", request_id, "] Launching parallel tasks:", sep=""))
+    api_log_info(paste("[", request_id, "]   Task 1: ROTL query with", nrow(valid_species), "OTT IDs"))
+    api_log_info(paste("[", request_id, "]   Task 2: DateLife query with", length(cleaned_scientific_names), "scientific names"))
+    
     parallel_results <- tryCatch({
       parLapply(cl, list(
         # Task 1: ROTL query
@@ -128,54 +162,77 @@ generate_hybrid_tree_html <- function(common_names, scientific_names) {
       stopCluster(cl)
     })
     
+    parallel_duration <- as.numeric(difftime(Sys.time(), parallel_start, units = "secs"))
+    step_duration <- as.numeric(difftime(Sys.time(), step_start, units = "secs"))
+    api_log_info(paste("[", request_id, "] Parallel processing completed - Duration:", round(parallel_duration, 3), "s (Total Step 2:", round(step_duration, 3), "s)"))
+    
     # Extract results from parallel execution
     rotl_result <- parallel_results[[1]]
     datelife_result_wrapper <- parallel_results[[2]]
     
+    api_log_info(paste("[", request_id, "] Processing parallel results...", sep=""))
+    
     # Handle ROTL result
     if (!rotl_result$success || is.null(rotl_result$result)) {
+      api_log_error(paste("[", request_id, "] ROTL QUERY FAILED:", rotl_result$error))
       return(list(
         success = FALSE,
         error = paste("Failed to get tree from Open Tree of Life:", rotl_result$error)
       ))
     }
     rotl_tree <- rotl_result$result
+    api_log_info(paste("[", request_id, "] ROTL query successful - Tree has", length(rotl_tree$tip.label), "tips and", rotl_tree$Nnode, "internal nodes"))
     
     # Handle DateLife result
     if (datelife_result_wrapper$success) {
       datelife_result <- datelife_result_wrapper$result
-      cat("DateLife parallel query completed successfully\n")
+      api_log_info(paste("[", request_id, "] DateLife query successful - Found", length(datelife_result), "chronograms"))
     } else {
       datelife_result <- list()
-      cat("DateLife parallel query failed:", datelife_result_wrapper$error, "\n")
+      api_log_warn(paste("[", request_id, "] DateLife query failed:", datelife_result_wrapper$error))
+      api_log_info(paste("[", request_id, "] Proceeding with topology-only tree (no age data will be available)", sep=""))
     }
     
     # Step 3: Create age mapping from DateLife data
+    step_start <- Sys.time()
+    api_log_info(paste("[", request_id, "] STEP 3: Processing DateLife age data...", sep=""))
+    
     datelife_phylo <- NULL
     datelife_species <- c()
     ancestor_ages <- list()
     
     if (length(datelife_result) > 0) {
-      cat("DateLife found", length(datelife_result), "chronograms\n")
+      api_log_info(paste("[", request_id, "] Processing", length(datelife_result), "DateLife chronograms..."))
       
       # Extract species that have DateLife data
       for (i in seq_along(datelife_result)) {
         study_species <- rownames(datelife_result[[i]])
         datelife_species <- unique(c(datelife_species, study_species))
       }
+      api_log_info(paste("[", request_id, "] Extracted", length(datelife_species), "unique species from DateLife chronograms"))
       
       # Create consensus matrix and phylo tree to get ancestor ages
       tryCatch({
+        api_log_info(paste("[", request_id, "] Creating consensus matrix from chronograms...", sep=""))
+        consensus_start <- Sys.time()
         consensus_matrix <- datelife_result_median_matrix(datelife_result)
+        consensus_duration <- as.numeric(difftime(Sys.time(), consensus_start, units = "secs"))
+        api_log_info(paste("[", request_id, "] Consensus matrix created -", nrow(consensus_matrix), "x", ncol(consensus_matrix), "matrix - Duration:", round(consensus_duration, 3), "s"))
         
         if (nrow(consensus_matrix) >= 2) {
+          api_log_info(paste("[", request_id, "] Converting consensus matrix to phylo tree...", sep=""))
+          phylo_start <- Sys.time()
           # Convert to phylo tree using proper DateLife function
           datelife_phylo <- summary_matrix_to_phylo(consensus_matrix)
+          phylo_duration <- as.numeric(difftime(Sys.time(), phylo_start, units = "secs"))
+          api_log_info(paste("[", request_id, "] DateLife phylo tree created - Duration:", round(phylo_duration, 3), "s"))
           
           # Get node depths (ages) from DateLife tree
+          api_log_info(paste("[", request_id, "] Extracting ancestor ages from DateLife tree...", sep=""))
           node_depths <- node.depth.edgelength(datelife_phylo)
           root_age <- max(node_depths)
           node_ages <- root_age - node_depths
+          api_log_info(paste("[", request_id, "] DateLife tree root age:", round(root_age, 1), "Mya"))
           
           # Extract ancestor ages for internal nodes
           n_tips_datelife <- length(datelife_phylo$tip.label)
@@ -191,27 +248,53 @@ generate_hybrid_tree_html <- function(common_names, scientific_names) {
             ancestor_ages[[desc_key]] <- ancestor_age
           }
           
-          cat("Extracted ancestor ages for", length(ancestor_ages), "internal nodes from DateLife\n")
+          api_log_info(paste("[", request_id, "] Extracted ancestor ages for", length(ancestor_ages), "internal nodes from DateLife"))
+        } else {
+          api_log_warn(paste("[", request_id, "] Consensus matrix too small (", nrow(consensus_matrix), "species) - skipping phylo tree creation", sep=""))
         }
       }, error = function(e) {
-        cat("Warning: Could not create DateLife phylo tree:", conditionMessage(e), "\n")
+        api_log_error(paste("[", request_id, "] Could not create DateLife phylo tree:", conditionMessage(e)))
       })
+    } else {
+      api_log_info(paste("[", request_id, "] No DateLife chronograms available - proceeding without age data", sep=""))
     }
     
+    step_duration <- as.numeric(difftime(Sys.time(), step_start, units = "secs"))
+    api_log_info(paste("[", request_id, "] Step 3 completed - Duration:", round(step_duration, 3), "s"))
+    
     # Step 4: Convert ROTL tree to network format with hybrid age information
-    network_data <- convert_phylo_to_network_hybrid(rotl_tree, valid_species, datelife_species, ancestor_ages)
+    step_start <- Sys.time()
+    api_log_info(paste("[", request_id, "] STEP 4: Converting ROTL tree to network format with age information...", sep=""))
+    
+    network_data <- convert_phylo_to_network_hybrid(rotl_tree, valid_species, datelife_species, ancestor_ages, request_id)
     
     if (is.null(network_data) || nrow(network_data) == 0) {
+      api_log_error(paste("[", request_id, "] Failed to convert tree to network format", sep=""))
       return(list(
         success = FALSE,
         error = "Failed to convert tree to network format"
       ))
     }
     
+    step_duration <- as.numeric(difftime(Sys.time(), step_start, units = "secs"))
+    api_log_info(paste("[", request_id, "] Network conversion completed -", nrow(network_data), "edges created - Duration:", round(step_duration, 3), "s"))
+    
+    # Count nodes with age data
+    nodes_with_ages <- sum(network_data$HasAge, na.rm = TRUE)
+    total_nodes <- nrow(network_data)
+    api_log_info(paste("[", request_id, "] Age coverage:", nodes_with_ages, "/", total_nodes, "nodes have age information"))
+    
     # Step 5: Create visualization
-    tree_html <- create_hybrid_tree_visualization(network_data)
+    step_start <- Sys.time()
+    api_log_info(paste("[", request_id, "] STEP 5: Creating hybrid tree visualization...", sep=""))
+    
+    tree_html <- create_hybrid_tree_visualization(network_data, request_id)
+    
+    step_duration <- as.numeric(difftime(Sys.time(), step_start, units = "secs"))
+    api_log_info(paste("[", request_id, "] Visualization created - Duration:", round(step_duration, 3), "s"))
     
     # Determine which species are missing age data (similar to /api/dated-tree)
+    api_log_info(paste("[", request_id, "] Analyzing age data coverage...", sep=""))
     # Need to normalize species names for comparison (DateLife uses underscores, input uses spaces)
     datelife_species_normalized <- gsub("_", " ", datelife_species)
     species_without_ages_scientific <- c()
@@ -232,6 +315,20 @@ generate_hybrid_tree_html <- function(common_names, scientific_names) {
       }
     }
     
+    species_with_ages <- length(scientific_names) - length(species_without_ages_scientific)
+    coverage_type <- if (length(species_without_ages_scientific) == 0) "complete" else "partial"
+    
+    api_log_info(paste("[", request_id, "] Age coverage analysis complete:", sep=""))
+    api_log_info(paste("[", request_id, "]   Species with ages:", species_with_ages, "/", length(scientific_names)))
+    api_log_info(paste("[", request_id, "]   Species without ages:", length(species_without_ages_scientific)))
+    api_log_info(paste("[", request_id, "]   Coverage type:", coverage_type))
+    
+    if (length(species_without_ages_common) > 0) {
+      api_log_info(paste("[", request_id, "]   Species missing age data:", paste(head(species_without_ages_common, 3), collapse = ', '), if(length(species_without_ages_common) > 3) '...' else '', sep=" "))
+    }
+    
+    api_log_info(paste("[", request_id, "] === HYBRID TREE GENERATION COMPLETED SUCCESSFULLY ===", sep=""))
+    
     return(list(
       success = TRUE,
       html = tree_html,
@@ -246,15 +343,17 @@ generate_hybrid_tree_html <- function(common_names, scientific_names) {
       # Add missing species fields for frontend compatibility (like /api/dated-tree)
       missing_common_names = species_without_ages_common,
       missing_scientific_names = species_without_ages_scientific,
-      coverage = if (length(species_without_ages_scientific) == 0) "complete" else "partial"
+      coverage = coverage_type
     ))
     
   }, error = function(e) {
+    # Safe logging without glue interpolation to avoid recursive errors
+    api_log_error(paste("HYBRID TREE GENERATION FAILED for request", request_id, ":", conditionMessage(e)))
     return(list(
       success = FALSE,
       error = paste("Error generating hybrid tree:", conditionMessage(e)),
-      input_common_names = common_names,
-      input_scientific_names = scientific_names,
+      input_common_names = if(exists("common_names")) common_names else c(),
+      input_scientific_names = if(exists("scientific_names")) scientific_names else c(),
       missing_common_names = c(),  # Initialize empty for frontend compatibility
       missing_scientific_names = c()  # Initialize empty for frontend compatibility
     ))
@@ -266,14 +365,19 @@ generate_hybrid_tree_html <- function(common_names, scientific_names) {
 #' @param species_data Species data frame with user-provided names
 #' @param datelife_species Vector of species names that have DateLife age data
 #' @param ancestor_ages Named list mapping descendant combinations to ancestor ages
+#' @param request_id Optional request ID for logging correlation
 #' @return Data frame with parent-child network structure and age information
-convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_species, ancestor_ages) {
+convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_species, ancestor_ages, request_id = NULL) {
+  
+  if (is.null(request_id)) {
+    request_id <- "network_conv"
+  }
   
   n_tips <- length(phylo_tree$tip.label)
   n_nodes <- phylo_tree$Nnode
   
-  cat(sprintf("Processing hybrid tree with %d tips and %d internal nodes\n", n_tips, n_nodes))
-  cat(sprintf("DateLife coverage: %d/%d species\n", length(datelife_species), nrow(species_data)))
+  api_log_info(paste("[", request_id, "] Processing hybrid tree with", n_tips, "tips and", n_nodes, "internal nodes"))
+  api_log_info(paste("[", request_id, "] DateLife coverage:", length(datelife_species), "/", nrow(species_data), "species"))
   
   # Create network data frame
   network_data <- data.frame(
@@ -580,8 +684,14 @@ transform_hybrid_to_info_panel_format <- function(network_data) {
 
 #' Create CollapsibleTree visualization for hybrid tree
 #' @param network_data Network data frame with age information
+#' @param request_id Optional request ID for logging correlation
 #' @return HTML string for CollapsibleTree
-create_hybrid_tree_visualization <- function(network_data) {
+create_hybrid_tree_visualization <- function(network_data, request_id = NULL) {
+  if (is.null(request_id)) {
+    request_id <- "viz_create"
+  }
+  
+  api_log_info(paste("[", request_id, "] Starting hybrid tree visualization creation...", sep=""))
   
   # Calculate dynamic link length with extra space for age information
   link_length <- calculate_dynamic_link_length_hybrid(network_data)
@@ -620,10 +730,10 @@ create_hybrid_tree_visualization <- function(network_data) {
   info_panel_network_data <- transform_hybrid_to_info_panel_format(network_data)
   
   # Add info panel data to tree_data
-  tree_data <- add_info_panel_data(tree_data, info_panel_network_data)
+  tree_data <- add_info_panel_data(tree_data, info_panel_network_data, request_id)
   
   # Use enhanced tree HTML generation with info panels
-  tree_html <- create_enhanced_tree_html(tree_data, info_panel_network_data, tree_widget)
+  tree_html <- create_enhanced_tree_html(tree_data, info_panel_network_data, tree_widget, request_id)
   
   
   return(tree_html)
