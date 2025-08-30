@@ -3,13 +3,17 @@
 # Kill any existing phylocom processes that may be hanging
 pkill -f "phylocom bladj" 2>/dev/null || true
 
+# Kill any existing tail processes on the log file to prevent duplication
+pkill -f "tail -f logs/api.log" 2>/dev/null || true
+
 # Generate random hybrid phylogenetic tree HTML using /api/full-tree-dated
 # Combines ROTL topology with DateLife ages where available
-# Usage: ./sh/generate_random_hybrid.sh [count] [output_file]
+# Usage: ./sh/generate_random_hybrid.sh [count] [output_file] [--simple]
 #
 # Arguments:
 #   count: Number of species (3-20, default random between 4-12)
 #   output_file: Output HTML file (default sh/random_hybrid_tree.html)
+#   --simple: Use predefined simple species set (chicken, human, chimpanzee)
 
 # Get API key from .Renviron file
 if [[ -f ".Renviron" ]]; then
@@ -25,22 +29,51 @@ else
     exit 1
 fi
 
-# Set defaults - random count between 4-12 if not specified
-if [ -z "$1" ]; then
-    COUNT=$((4 + RANDOM % 9))  # Random number between 4 and 12
-else
-    COUNT=$1
-fi
-OUTPUT_FILE=${2:-"sh/random_hybrid_tree.html"}
+# Parse command line arguments
+USE_SIMPLE=false
+COUNT=""
+OUTPUT_FILE=""
 
-# Validate count parameter
-if [[ $COUNT -lt 3 || $COUNT -gt 20 ]]; then
-    echo "Error: Count must be between 3 and 20" >&2
-    exit 1
+# Parse arguments
+for arg in "$@"; do
+    case $arg in
+        --simple)
+            USE_SIMPLE=true
+            ;;
+        *)
+            if [[ -z "$COUNT" && "$arg" =~ ^[0-9]+$ ]]; then
+                COUNT=$arg
+            elif [[ -z "$OUTPUT_FILE" ]]; then
+                OUTPUT_FILE=$arg
+            fi
+            ;;
+    esac
+done
+
+# Set defaults
+if [[ "$USE_SIMPLE" == true ]]; then
+    COUNT=3  # Fixed count for simple mode
+else
+    # Set defaults - random count between 4-12 if not specified
+    if [ -z "$COUNT" ]; then
+        COUNT=$((4 + RANDOM % 9))  # Random number between 4 and 12
+    fi
+    
+    # Validate count parameter
+    if [[ $COUNT -lt 3 || $COUNT -gt 20 ]]; then
+        echo "Error: Count must be between 3 and 20" >&2
+        exit 1
+    fi
 fi
+
+OUTPUT_FILE=${OUTPUT_FILE:-"sh/random_hybrid_tree.html"}
 
 echo "=== Hybrid Tree Generation Test ==="
-echo "Generating random hybrid tree with $COUNT species..."
+if [[ "$USE_SIMPLE" == true ]]; then
+    echo "Generating simple hybrid tree with predefined species set..."
+else
+    echo "Generating random hybrid tree with $COUNT species..."
+fi
 echo "Output will be saved to: $OUTPUT_FILE"
 
 # Check if server is running
@@ -66,44 +99,57 @@ else
     exit 1
 fi
 
-# Step 1: Select random species directly from database
+# Step 1: Select species (random or simple)
 echo ""
-echo "Step 1: Selecting $COUNT random species from database..."
-
-# Use SQLite CLI to directly query the species database
-SQLITE_OUTPUT=$(sqlite3 data/species.sqlite "
-  SELECT common || '|' || scientific 
-  FROM species 
-  WHERE common IS NOT NULL 
-    AND scientific IS NOT NULL 
-    AND common != '' 
-    AND scientific != ''
-  ORDER BY RANDOM() 
-  LIMIT $COUNT;
-")
-
-# Check if database query was successful
-if [[ -z "$SQLITE_OUTPUT" ]]; then
-    echo "❌ Error querying species database or no species found"
-    exit 1
-fi
-
-# Parse the pipe-delimited output
-COMMON_ARRAY=()
-SCIENTIFIC_ARRAY=()
-
-echo "✅ Selected species from database:"
-i=0
-while IFS='|' read -r COMMON_NAME SCIENTIFIC_NAME; do
-    if [[ -n "$COMMON_NAME" && -n "$SCIENTIFIC_NAME" ]]; then
-        echo "   🧬 $COMMON_NAME ($SCIENTIFIC_NAME)"
-        
-        # Add to arrays
-        COMMON_ARRAY+=("$COMMON_NAME")
-        SCIENTIFIC_ARRAY+=("$SCIENTIFIC_NAME")
-        ((i++))
+if [[ "$USE_SIMPLE" == true ]]; then
+    echo "Step 1: Using predefined simple species set..."
+    
+    # Use predefined simple species set
+    COMMON_ARRAY=("Chicken" "Human" "Chimpanzee")
+    SCIENTIFIC_ARRAY=("Gallus gallus" "Homo sapiens" "Pan troglodytes")
+    
+    echo "✅ Using predefined simple species:"
+    for i in "${!COMMON_ARRAY[@]}"; do
+        echo "   🧬 ${COMMON_ARRAY[$i]} (${SCIENTIFIC_ARRAY[$i]})"
+    done
+else
+    echo "Step 1: Selecting $COUNT random species from database..."
+    
+    # Use SQLite CLI to directly query the species database
+    SQLITE_OUTPUT=$(sqlite3 data/species.sqlite "
+      SELECT common || '|' || scientific 
+      FROM species 
+      WHERE common IS NOT NULL 
+        AND scientific IS NOT NULL 
+        AND common != '' 
+        AND scientific != ''
+      ORDER BY RANDOM() 
+      LIMIT $COUNT;
+    ")
+    
+    # Check if database query was successful
+    if [[ -z "$SQLITE_OUTPUT" ]]; then
+        echo "❌ Error querying species database or no species found"
+        exit 1
     fi
-done <<< "$SQLITE_OUTPUT"
+    
+    # Parse the pipe-delimited output
+    COMMON_ARRAY=()
+    SCIENTIFIC_ARRAY=()
+    
+    echo "✅ Selected species from database:"
+    i=0
+    while IFS='|' read -r COMMON_NAME SCIENTIFIC_NAME; do
+        if [[ -n "$COMMON_NAME" && -n "$SCIENTIFIC_NAME" ]]; then
+            echo "   🧬 $COMMON_NAME ($SCIENTIFIC_NAME)"
+            
+            # Add to arrays
+            COMMON_ARRAY+=("$COMMON_NAME")
+            SCIENTIFIC_ARRAY+=("$SCIENTIFIC_NAME")
+            ((i++))
+        fi
+    done <<< "$SQLITE_OUTPUT"
+fi
 
 # Convert arrays to JSON format
 COMMON_LIST=$(printf '%s\n' "${COMMON_ARRAY[@]}" | jq -R . | jq -s .)
@@ -120,7 +166,11 @@ echo "Step 2: Generating hybrid tree with /api/full-tree-dated..."
 echo "Common names: $COMMON_LIST"
 echo "Scientific names: $SCIENTIFIC_LIST"
 echo ""
-echo "🔄 Processing hybrid tree generation (this may take 30-90 seconds for $COUNT species)..."
+if [[ "$USE_SIMPLE" == true ]]; then
+    echo "🔄 Processing hybrid tree generation for simple species set (this may take 30-60 seconds)..."
+else
+    echo "🔄 Processing hybrid tree generation (this may take 30-90 seconds for $COUNT species)..."
+fi
 echo "   📊 Stage 1: Querying DateLife chronogram database..."
 echo "   🌳 Stage 2: Building ROTL phylogenetic tree topology..."
 echo "   🧬 Stage 3: Mapping ancestor ages to tree nodes..."
@@ -130,8 +180,7 @@ echo ""
 # Create a temporary file for the response
 TEMP_RESPONSE=$(mktemp)
 
-echo "🚀 Starting API request..."
-echo -n "   Progress: "
+echo "🚀 Starting API request and streaming logs..."
 
 # Start curl in background and write to temp file
 (curl -s -X POST \
@@ -142,25 +191,33 @@ echo -n "   Progress: "
 
 CURL_PID=$!
 
-# Show animated progress while waiting
-chars="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-count=0
-while kill -0 $CURL_PID 2>/dev/null; do
-    printf "\b${chars:$((count % ${#chars})):1}"
-    sleep 0.3
-    ((count++))
-    
-    # Show elapsed time every 10 iterations (3 seconds)
-    if (( count % 10 == 0 )); then
-        elapsed=$((count / 3))
-        printf "\r   Progress: ${chars:$((count % ${#chars})):1} (${elapsed}s elapsed) "
+# Stream server logs while waiting with color coding
+(tail -f logs/api.log | while IFS= read -r line; do
+    # Color coding for different log levels and patterns
+    if [[ "$line" =~ ERROR|Error|error ]]; then
+        echo -e "\033[31m$line\033[0m"  # Red for errors
+    elif [[ "$line" =~ WARN|Warning|warning ]]; then
+        echo -e "\033[33m$line\033[0m"  # Yellow for warnings
+    elif [[ "$line" =~ INFO|Info|info|Starting|Finished|Success|Complete ]]; then
+        echo -e "\033[32m$line\033[0m"  # Green for info/success
+    elif [[ "$line" =~ DEBUG|Debug|debug ]]; then
+        echo -e "\033[36m$line\033[0m"  # Cyan for debug
+    elif [[ "$line" =~ "API call"|"Endpoint"|"Request"|"Response" ]]; then
+        echo -e "\033[35m$line\033[0m"  # Magenta for API-related
+    elif [[ "$line" =~ "DateLife"|"ROTL"|"Wikipedia"|"PhyloPic" ]]; then
+        echo -e "\033[34m$line\033[0m"  # Blue for external services
+    else
+        echo "$line"  # Default color for other lines
     fi
-done
+done) &
+TAIL_PID=$!
 
-# Wait for completion and get exit code
+# Wait for curl to complete
 wait $CURL_PID
 CURL_EXIT_CODE=$?
-printf "\r   Progress: ✅ Complete!                    \n"
+
+# Stop log streaming
+kill $TAIL_PID 2>/dev/null
 
 if [[ $CURL_EXIT_CODE -ne 0 ]]; then
     echo "❌ Network request failed (exit code: $CURL_EXIT_CODE)"
