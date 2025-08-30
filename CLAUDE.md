@@ -367,3 +367,4 @@ hybrid_result <- generate_hybrid_tree_html(common_names, scientific_names)
 # Performance testing
 source("test_parallel_performance.R")  # Benchmarks parallel processing improvements
 ```
+- do not log using cat() use the project's logger() implementation

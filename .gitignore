@@ -25,3 +25,4 @@ claude/
 .httr-oauth
 
 tests/
+cache/

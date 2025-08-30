@@ -431,21 +431,45 @@ function(req, common_names = NULL, scientific_names = NULL, allow_partial_respon
   }
   
   tryCatch({
-    # Load DateLife
+    # Load DateLife and efficiency functions
     library(datelife)
     library(ape)
+    source("functions/datelife_efficiency.R")
     
-    # Clean scientific names to remove parenthetical addendums that can cause phylocom parsing issues
-    cleaned_scientific_list <- clean_scientific_names(scientific_list)
-    cat("Cleaned scientific names for DateLife query:\n")
-    for (i in seq_along(scientific_list)) {
-      if (scientific_list[i] != cleaned_scientific_list[i]) {
-        cat("  ", scientific_list[i], " -> ", cleaned_scientific_list[i], "\n")
+    # Get species data with DateLife availability information for efficiency optimization
+    api_log_info("Checking DateLife availability in database for efficiency optimization...")
+    species_data <- get_species_with_datelife_info(common_list, scientific_list)
+    
+    # Check if DateLife processing should be skipped
+    datelife_skip_check <- should_skip_datelife_processing(species_data)
+    
+    if (datelife_skip_check$should_skip) {
+      api_log_info(paste("EFFICIENCY OPTIMIZATION: Skipping DateLife processing -", datelife_skip_check$reason))
+      return(list(
+        success = FALSE,
+        coverage = "insufficient_datelife_data",
+        error = paste("Insufficient DateLife coverage in database:", datelife_skip_check$reason),
+        input_common_names = common_list,
+        input_scientific_names = scientific_list,
+        efficiency_stats = get_datelife_efficiency_stats(species_data),
+        note = "Database indicates insufficient DateLife coverage. Try /api/tree for topology-only trees or /api/full-tree-dated for hybrid trees."
+      ))
+    }
+    
+    # Get filtered scientific names for efficient DateLife processing
+    datelife_scientific_names <- get_datelife_scientific_names(species_data)
+    cleaned_scientific_list <- clean_scientific_names(datelife_scientific_names)
+    
+    api_log_info(paste("EFFICIENCY OPTIMIZATION: Processing", length(cleaned_scientific_list), "out of", length(scientific_list), "species with DateLife data"))
+    api_log_info("Cleaned scientific names for DateLife query:")
+    for (i in seq_along(datelife_scientific_names)) {
+      if (datelife_scientific_names[i] != cleaned_scientific_list[i]) {
+        api_log_info(paste("  ", datelife_scientific_names[i], " -> ", cleaned_scientific_list[i]))
       }
     }
     
     # Try DateLife with the cleaned scientific names with timeout
-    cat("Attempting DateLife with species:", paste(cleaned_scientific_list, collapse = ", "), "\n")
+    api_log_info(paste("Attempting DateLife with species:", paste(cleaned_scientific_list, collapse = ", ")))
     
     # Implement timeout wrapper for DateLife to prevent hanging
     datelife_result <- tryCatch({
@@ -464,7 +488,7 @@ function(req, common_names = NULL, scientific_names = NULL, allow_partial_respon
       setTimeLimit(cpu = Inf, elapsed = Inf, transient = FALSE)
       
       if (grepl("timeout|time limit", e$message)) {
-        cat("DateLife query timed out after 60 seconds\n")
+        api_log_warn("DateLife query timed out after 60 seconds")
         return(NULL)  # Return NULL to trigger timeout error response
       } else {
         stop(e)  # Re-throw other errors

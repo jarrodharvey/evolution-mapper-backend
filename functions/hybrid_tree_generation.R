@@ -17,6 +17,7 @@ source("functions/logging_config.R")
 
 source("functions/rotl_tree_generation.R")
 source("functions/datelife_tree_generation.R")  # For optimized DateLife functions
+source("functions/datelife_efficiency.R")  # For DateLife efficiency optimizations
 source("functions/color_config.R")
 
 #' Clean scientific names by removing parenthetical addendums
@@ -208,15 +209,19 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
     dropped_common_names <- c()
     dropped_scientific_names <- c()
     
-    # Step 1: Get species data and check validity
+    # Step 1: Get species data with DateLife availability information
     step_start <- Sys.time()
-    api_log_info(paste("[", request_id, "] STEP 1: Getting species data from database...", sep=""))
+    api_log_info(paste("[", request_id, "] STEP 1: Getting species data with DateLife availability from database...", sep=""))
     
-    species_data <- get_species_from_db_paired(common_names, scientific_names)
+    species_data <- get_species_with_datelife_info(common_names, scientific_names)
     valid_species <- species_data[!is.na(species_data$ott), ]
+    
+    # Get efficiency statistics
+    efficiency_stats <- get_datelife_efficiency_stats(species_data, request_id)
     
     step_duration <- as.numeric(difftime(Sys.time(), step_start, units = "secs"))
     api_log_info(paste("[", request_id, "] Database lookup completed - Found", nrow(valid_species), "/", nrow(species_data), "valid OTT IDs - Duration:", round(step_duration, 3), "s"))
+    api_log_info(paste("[", request_id, "] DateLife availability: ", efficiency_stats$datelife_available_count, "/", efficiency_stats$valid_species_count, " species (", efficiency_stats$datelife_percentage, "%)", sep=""))
     
     if (nrow(valid_species) < 2) {
       # Find missing species for both OTT ID lookup and consistency with /api/dated-tree format
@@ -240,80 +245,102 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
       ))
     }
     
-    # Step 2: Run ROTL and DateLife calls in parallel
+    # Step 2: Check if DateLife processing should be skipped for efficiency
     step_start <- Sys.time()
-    api_log_info(paste("[", request_id, "] STEP 2: Running ROTL and DateLife queries in parallel...", sep=""))
+    datelife_skip_check <- should_skip_datelife_processing(species_data, request_id)
     
-    # Clean scientific names for DateLife
-    cleaned_scientific_names <- clean_scientific_names(scientific_names)
-    api_log_info(paste("[", request_id, "] Scientific name cleaning:", sep=""))
-    cleaned_count <- 0
-    for (i in seq_along(scientific_names)) {
-      if (scientific_names[i] != cleaned_scientific_names[i]) {
-        api_log_info(paste("[", request_id, "]  ", scientific_names[i], " -> ", cleaned_scientific_names[i], sep=""))
-        cleaned_count <- cleaned_count + 1
-      }
-    }
-    if (cleaned_count == 0) {
-      api_log_info(paste("[", request_id, "]   No names required cleaning", sep=""))
-    } else {
-      api_log_info(paste("[", request_id, "]   Cleaned", cleaned_count, "scientific names"))
-    }
-    
-    # Create parallel cluster (use 2 cores for the two main API calls)
-    api_log_info(paste("[", request_id, "] Creating parallel cluster for ROTL and DateLife queries...", sep=""))
-    parallel_start <- Sys.time()
-    cl <- makeCluster(2)
-    
-    # Export necessary libraries and data to cluster nodes
-    api_log_info(paste("[", request_id, "] Setting up cluster workers...", sep=""))
-    clusterEvalQ(cl, {
-      library(rotl)
-      library(datelife)
-      library(ape)
-    })
-    clusterExport(cl, c("valid_species", "cleaned_scientific_names"), envir = environment())
-    
-    # Define parallel tasks
-    api_log_info(paste("[", request_id, "] Launching parallel tasks:", sep=""))
-    api_log_info(paste("[", request_id, "]   Task 1: ROTL query with", nrow(valid_species), "OTT IDs"))
-    api_log_info(paste("[", request_id, "]   Task 2: DateLife query with", length(cleaned_scientific_names), "scientific names"))
-    
-    parallel_results <- tryCatch({
-      parLapply(cl, list(
-        # Task 1: ROTL query
-        list(task = "rotl", data = valid_species),
-        # Task 2: DateLife query  
-        list(task = "datelife", data = cleaned_scientific_names)
-      ), function(task_info) {
-        if (task_info$task == "rotl") {
-          tryCatch({
-            rotl_tree <- tol_induced_subtree(ott_ids = task_info$data$ott)
-            return(list(success = TRUE, result = rotl_tree, task = "rotl"))
-          }, error = function(e) {
-            return(list(success = FALSE, error = e$message, task = "rotl"))
-          })
-        } else if (task_info$task == "datelife") {
-          tryCatch({
-            # Use original DateLife function in parallel worker (simpler and more reliable)
-            datelife_result <- get_datelife_result(input = task_info$data, get_spp_from_taxon = FALSE, reference_taxonomy = 'opentree')
-            return(list(success = TRUE, result = datelife_result, task = "datelife"))
-          }, error = function(e) {
-            return(list(success = FALSE, error = e$message, task = "datelife", result = list()))
-          })
-        }
+    if (datelife_skip_check$should_skip) {
+      api_log_info(paste("[", request_id, "] STEP 2: SKIPPING DateLife processing (efficiency optimization) - ", datelife_skip_check$reason, sep=""))
+      api_log_info(paste("[", request_id, "] STEP 2: Running ROTL query only...", sep=""))
+      
+      # Run ROTL only since DateLife would be ineffective
+      rotl_result <- tryCatch({
+        rotl_tree <- tol_induced_subtree(ott_ids = valid_species$ott)
+        list(success = TRUE, result = rotl_tree)
+      }, error = function(e) {
+        list(success = FALSE, error = e$message)
       })
-    }, finally = {
-      stopCluster(cl)
-    })
+      
+      # Set empty DateLife results
+      datelife_result_wrapper <- list(success = TRUE, result = list())
+      
+    } else {
+      api_log_info(paste("[", request_id, "] STEP 2: Running ROTL and filtered DateLife queries in parallel...", sep=""))
+      
+      # Get filtered scientific names for DateLife (efficiency optimization)
+      datelife_scientific_names <- get_datelife_scientific_names(species_data, request_id)
+      cleaned_datelife_names <- clean_scientific_names(datelife_scientific_names)
+      
+      api_log_info(paste("[", request_id, "] Scientific name cleaning for DateLife subset:", sep=""))
+      cleaned_count <- 0
+      for (i in seq_along(datelife_scientific_names)) {
+        if (datelife_scientific_names[i] != cleaned_datelife_names[i]) {
+          api_log_info(paste("[", request_id, "]  ", datelife_scientific_names[i], " -> ", cleaned_datelife_names[i], sep=""))
+          cleaned_count <- cleaned_count + 1
+        }
+      }
+      if (cleaned_count == 0) {
+        api_log_info(paste("[", request_id, "]   No names required cleaning", sep=""))
+      } else {
+        api_log_info(paste("[", request_id, "]   Cleaned", cleaned_count, "scientific names"))
+      }
     
-    parallel_duration <- as.numeric(difftime(Sys.time(), parallel_start, units = "secs"))
+      # Create parallel cluster (use 2 cores for the two main API calls)
+      api_log_info(paste("[", request_id, "] Creating parallel cluster for ROTL and DateLife queries...", sep=""))
+      parallel_start <- Sys.time()
+      cl <- makeCluster(2)
+      
+      # Export necessary libraries and data to cluster nodes
+      api_log_info(paste("[", request_id, "] Setting up cluster workers...", sep=""))
+      clusterEvalQ(cl, {
+        library(rotl)
+        library(datelife)
+        library(ape)
+      })
+      clusterExport(cl, c("valid_species", "cleaned_datelife_names"), envir = environment())
+      
+      # Define parallel tasks
+      api_log_info(paste("[", request_id, "] Launching parallel tasks:", sep=""))
+      api_log_info(paste("[", request_id, "]   Task 1: ROTL query with", nrow(valid_species), "OTT IDs"))
+      api_log_info(paste("[", request_id, "]   Task 2: DateLife query with", length(cleaned_datelife_names), "filtered scientific names (efficiency optimization)"))
+      
+      parallel_results <- tryCatch({
+        parLapply(cl, list(
+          # Task 1: ROTL query
+          list(task = "rotl", data = valid_species),
+          # Task 2: DateLife query (filtered to only species with DateLife data)
+          list(task = "datelife", data = cleaned_datelife_names)
+        ), function(task_info) {
+          if (task_info$task == "rotl") {
+            tryCatch({
+              rotl_tree <- tol_induced_subtree(ott_ids = task_info$data$ott)
+              return(list(success = TRUE, result = rotl_tree, task = "rotl"))
+            }, error = function(e) {
+              return(list(success = FALSE, error = e$message, task = "rotl"))
+            })
+          } else if (task_info$task == "datelife") {
+            tryCatch({
+              # Use original DateLife function in parallel worker with filtered names
+              datelife_result <- get_datelife_result(input = task_info$data, get_spp_from_taxon = FALSE, reference_taxonomy = 'opentree')
+              return(list(success = TRUE, result = datelife_result, task = "datelife"))
+            }, error = function(e) {
+              return(list(success = FALSE, error = e$message, task = "datelife", result = list()))
+            })
+          }
+        })
+      }, finally = {
+        stopCluster(cl)
+      })
+      
+      parallel_duration <- as.numeric(difftime(Sys.time(), parallel_start, units = "secs"))
+      
+      # Extract results from parallel execution
+      rotl_result <- parallel_results[[1]]
+      datelife_result_wrapper <- parallel_results[[2]]
+    }
+    
     step_duration <- as.numeric(difftime(Sys.time(), step_start, units = "secs"))
-    api_log_info(paste("[", request_id, "] Parallel processing completed - Duration:", round(parallel_duration, 3), "s (Total Step 2:", round(step_duration, 3), "s)"))
-    
-    # Extract results from parallel execution
-    rotl_result <- parallel_results[[1]]
-    datelife_result_wrapper <- parallel_results[[2]]
+    api_log_info(paste("[", request_id, "] Step 2 completed - Duration:", round(step_duration, 3), "s", sep=""))
     
     api_log_info(paste("[", request_id, "] Processing parallel results...", sep=""))
     
