@@ -10,6 +10,7 @@ library(RSQLite)
 library(DBI)
 library(dplyr)
 library(parallel)
+library(memoise)
 
 # Source shared logging configuration
 source("functions/logging_config.R")
@@ -27,6 +28,146 @@ clean_scientific_names <- function(scientific_names) {
   cleaned <- gsub("\\s*\\([^)]+\\)\\s*$", "", scientific_names)
   cleaned <- trimws(cleaned)  # Remove any trailing whitespace
   return(cleaned)
+}
+
+#' Get current OTT ID for scientific name using TNRS with tree validation and disk caching
+#' @param scientific_name Scientific name to look up
+#' @param request_id Request ID for logging
+#' @return Current OTT ID that is confirmed to be in the tree, or NULL if not found
+get_current_ott_id_cached <- memoise(
+  function(scientific_name, request_id = "cache") {
+    tryCatch({
+      api_log_info(paste("[", request_id, "] TNRS lookup for:", scientific_name))
+      
+      # Use ROTL's Taxonomic Name Resolution Service
+      tnrs_result <- tnrs_match_names(names = scientific_name, 
+                                      context_name = NULL,  # Use all contexts
+                                      do_approximate_matching = TRUE,
+                                      include_suppressed = FALSE)
+      
+      if (nrow(tnrs_result) > 0) {
+        # Check all matches, not just the first one
+        for (i in 1:nrow(tnrs_result)) {
+          if (!is.na(tnrs_result$ott_id[i])) {
+            candidate_ott <- tnrs_result$ott_id[i]
+            match_score <- tnrs_result$score[i]
+            unique_name <- tnrs_result$unique_name[i]
+            flags <- tnrs_result$flags[i]
+            
+            api_log_info(paste("[", request_id, "] Checking candidate OTT ID:", candidate_ott, "for", unique_name, "(score:", match_score, ", flags:", flags, ")"))
+            
+            # Validate that this OTT ID is actually in the current tree
+            if (is_in_tree(candidate_ott)) {
+              api_log_info(paste("[", request_id, "] TNRS found valid OTT ID:", candidate_ott, "for", scientific_name, "->", unique_name))
+              return(candidate_ott)
+            } else {
+              api_log_warn(paste("[", request_id, "] TNRS candidate OTT ID", candidate_ott, "is not in tree (", unique_name, ")"))
+            }
+          }
+        }
+        
+        # No valid OTT IDs found
+        api_log_error(paste("[", request_id, "] TNRS found", nrow(tnrs_result), "matches but none are in the current tree for:", scientific_name))
+        return(NULL)
+      } else {
+        api_log_warn(paste("[", request_id, "] TNRS could not find any matches for:", scientific_name))
+        return(NULL)
+      }
+    }, error = function(e) {
+      api_log_error(paste("[", request_id, "] TNRS lookup failed for", scientific_name, ":", conditionMessage(e)))
+      return(NULL)
+    })
+  },
+  cache = cache_filesystem("cache/tnrs_cache")
+)
+
+#' Attempt to recover from pruned OTT IDs using TNRS
+#' @param error_message ROTL error message
+#' @param valid_species Data frame with common, scientific, ott columns
+#' @param request_id Request ID for logging  
+#' @return List with updated valid_species data frame and dropped species info
+recover_from_pruned_ott_ids <- function(error_message, valid_species, request_id) {
+  api_log_info(paste("[", request_id, "] Attempting recovery from pruned OTT IDs..."))
+  
+  # Extract pruned OTT IDs from error message
+  # Example error: "node_id 'ott426117' was not found!list(ott426117 = \"pruned_ott_id\")"
+  pruned_otts <- regmatches(error_message, gregexpr("ott[0-9]+", error_message))[[1]]
+  
+  if (length(pruned_otts) == 0) {
+    api_log_warn(paste("[", request_id, "] Could not extract pruned OTT IDs from error message"))
+    return(NULL)
+  }
+  
+  api_log_info(paste("[", request_id, "] Found", length(pruned_otts), "pruned OTT IDs:", paste(pruned_otts, collapse = ", ")))
+  
+  # Convert to numeric (remove 'ott' prefix)
+  pruned_ott_nums <- as.numeric(gsub("ott", "", pruned_otts))
+  
+  # Find affected species
+  affected_species <- valid_species[valid_species$ott %in% pruned_ott_nums, ]
+  
+  if (nrow(affected_species) == 0) {
+    api_log_warn(paste("[", request_id, "] No matching species found for pruned OTT IDs"))
+    return(NULL)
+  }
+  
+  api_log_info(paste("[", request_id, "] Attempting TNRS lookup for", nrow(affected_species), "affected species"))
+  
+  # Try to get current OTT IDs using TNRS
+  updated_species <- valid_species
+  species_to_remove <- c()
+  
+  for (i in 1:nrow(affected_species)) {
+    old_ott <- affected_species$ott[i]
+    scientific_name <- affected_species$scientific[i]
+    common_name <- affected_species$common[i]
+    
+    api_log_info(paste("[", request_id, "] Recovering OTT ID for:", common_name, "(", scientific_name, ") - old OTT:", old_ott))
+    
+    new_ott <- get_current_ott_id_cached(scientific_name, request_id)
+    
+    if (!is.null(new_ott)) {
+      # Update the OTT ID in our data frame
+      updated_species[updated_species$ott == old_ott, "ott"] <- new_ott
+      api_log_info(paste("[", request_id, "] Updated", common_name, "from OTT", old_ott, "to OTT", new_ott))
+    } else {
+      api_log_warn(paste("[", request_id, "] Could not recover OTT ID for", common_name, "(", scientific_name, ") - will remove from tree"))
+      species_to_remove <- c(species_to_remove, old_ott)
+    }
+  }
+  
+  # Remove species that couldn't be recovered and track dropped species info
+  dropped_common <- c()
+  dropped_scientific <- c()
+  
+  if (length(species_to_remove) > 0) {
+    # Get info about dropped species before removing them
+    dropped_species_info <- updated_species[updated_species$ott %in% species_to_remove, ]
+    dropped_common <- dropped_species_info$common
+    dropped_scientific <- dropped_species_info$scientific
+    
+    updated_species <- updated_species[!updated_species$ott %in% species_to_remove, ]
+    api_log_info(paste("[", request_id, "] Removed", length(species_to_remove), "species that could not be recovered"))
+  }
+  
+  # Check if we still have enough species for tree generation (minimum 2)
+  if (nrow(updated_species) < 2) {
+    api_log_error(paste("[", request_id, "] Insufficient species remaining after recovery (", nrow(updated_species), "< 2)"))
+    return(list(
+      updated_species = NULL,
+      dropped_common_names = dropped_common,
+      dropped_scientific_names = dropped_scientific
+    ))
+  }
+  
+  recovered_count <- nrow(affected_species) - length(species_to_remove)
+  api_log_info(paste("[", request_id, "] TNRS recovery completed:", recovered_count, "recovered,", length(species_to_remove), "removed,", nrow(updated_species), "total remaining"))
+  
+  return(list(
+    updated_species = updated_species,
+    dropped_common_names = dropped_common,
+    dropped_scientific_names = dropped_scientific
+  ))
 }
 
 # Calculate dynamic link length for hybrid trees with age information
@@ -62,6 +203,10 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
     api_log_info(paste("[", request_id, "] Input:", length(common_names), "species"))
     api_log_info(paste("[", request_id, "] Common names:", paste(head(common_names, 5), collapse = ', '), if(length(common_names) > 5) '...' else '', sep=" "))
     api_log_info(paste("[", request_id, "] Scientific names:", paste(head(scientific_names, 5), collapse = ', '), if(length(scientific_names) > 5) '...' else '', sep=" "))
+    
+    # Initialize dropped species tracking variables
+    dropped_common_names <- c()
+    dropped_scientific_names <- c()
     
     # Step 1: Get species data and check validity
     step_start <- Sys.time()
@@ -175,12 +320,56 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
     # Handle ROTL result
     if (!rotl_result$success || is.null(rotl_result$result)) {
       api_log_error(paste("[", request_id, "] ROTL QUERY FAILED:", rotl_result$error))
-      return(list(
-        success = FALSE,
-        error = paste("Failed to get tree from Open Tree of Life:", rotl_result$error)
-      ))
+      
+      # Check if this is a pruned OTT ID error and attempt recovery
+      if (grepl("was not found.*pruned_ott_id", rotl_result$error)) {
+        api_log_info(paste("[", request_id, "] Detected pruned OTT ID error - attempting TNRS recovery"))
+        
+        recovery_result <- recover_from_pruned_ott_ids(rotl_result$error, valid_species, request_id)
+        
+        if (!is.null(recovery_result$updated_species)) {
+          api_log_info(paste("[", request_id, "] TNRS recovery successful - retrying ROTL query with updated OTT IDs"))
+          
+          # Retry ROTL query with updated OTT IDs
+          retry_result <- tryCatch({
+            rotl_tree <- tol_induced_subtree(ott_ids = recovery_result$updated_species$ott)
+            list(success = TRUE, result = rotl_tree)
+          }, error = function(e) {
+            list(success = FALSE, error = e$message)
+          })
+          
+          if (retry_result$success) {
+            api_log_info(paste("[", request_id, "] ROTL retry successful after TNRS recovery"))
+            rotl_tree <- retry_result$result
+            # Update valid_species with recovered OTT IDs for downstream processing
+            valid_species <- recovery_result$updated_species
+            # Store dropped species information for final response
+            dropped_common_names <- recovery_result$dropped_common_names
+            dropped_scientific_names <- recovery_result$dropped_scientific_names
+          } else {
+            api_log_error(paste("[", request_id, "] ROTL retry failed even after TNRS recovery:", retry_result$error))
+            return(list(
+              success = FALSE,
+              error = paste("Failed to get tree from Open Tree of Life even after TNRS recovery:", retry_result$error)
+            ))
+          }
+        } else {
+          api_log_error(paste("[", request_id, "] TNRS recovery failed"))
+          return(list(
+            success = FALSE,
+            error = paste("Failed to get tree from Open Tree of Life (TNRS recovery also failed):", rotl_result$error)
+          ))
+        }
+      } else {
+        # Non-pruned error, return original error
+        return(list(
+          success = FALSE,
+          error = paste("Failed to get tree from Open Tree of Life:", rotl_result$error)
+        ))
+      }
+    } else {
+      rotl_tree <- rotl_result$result
     }
-    rotl_tree <- rotl_result$result
     api_log_info(paste("[", request_id, "] ROTL query successful - Tree has", length(rotl_tree$tip.label), "tips and", rotl_tree$Nnode, "internal nodes"))
     
     # Handle DateLife result
@@ -343,6 +532,9 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
       # Add missing species fields for frontend compatibility (like /api/dated-tree)
       missing_common_names = species_without_ages_common,
       missing_scientific_names = species_without_ages_scientific,
+      # Add dropped species fields for pruned OTT ID recovery
+      dropped_common_names = dropped_common_names,
+      dropped_scientific_names = dropped_scientific_names,
       coverage = coverage_type
     ))
     
