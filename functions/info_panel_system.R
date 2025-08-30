@@ -8,6 +8,9 @@ source("functions/wikipedia_api.R")
 # Source PhyloPic silhouette functions
 source("functions/phylopic_silhouettes.R")
 
+# Source cached API functions for improved performance
+source("functions/cached_api_functions.R")
+
 # Load parallel processing library
 library(parallel)
 
@@ -895,12 +898,16 @@ create_info_panel_data_parallel <- function(network_data, request_id = NULL) {
       library(rphylopic)
       library(png)
       library(base64enc)
+      library(memoise)
+      library(cachem)
     })
     
-    # Source the necessary function files on each worker
+    # Source the necessary function files on each worker (including cached functions)
     clusterEvalQ(cl, {
+      source("functions/logging_config.R")
       source("functions/wikipedia_api.R")
       source("functions/phylopic_silhouettes.R")
+      source("functions/cached_api_functions.R")
     })
     
     clusterExport(cl, c(
@@ -933,10 +940,10 @@ create_info_panel_data_parallel <- function(network_data, request_id = NULL) {
         # Fetch Wikipedia and PhyloPic data sequentially within each parallel worker
         # (simpler than nested parallelization, still faster overall since nodes are processed in parallel)
         
-        # Try Wikipedia API call
+        # Try Wikipedia API call using cached function
         tryCatch({
-          if (exists("get_wikipedia_intro")) {
-            wikipedia_result <- get_wikipedia_intro(taxonomic_name, truncate_length = 250)
+          if (exists("cached_get_wikipedia_intro")) {
+            wikipedia_result <- cached_get_wikipedia_intro(taxonomic_name, truncate_length = 250)
             if (wikipedia_result$success) {
               node_info$wikipedia_summary <- wikipedia_result$introduction
               node_info$wikipedia_url <- wikipedia_result$url
@@ -948,10 +955,10 @@ create_info_panel_data_parallel <- function(network_data, request_id = NULL) {
           # If there's an error, just don't add Wikipedia data
         })
         
-        # Try PhyloPic API call
+        # Try PhyloPic API call using cached function
         tryCatch({
-          if (exists("get_silhouette_data")) {
-            silhouette_result <- get_silhouette_data(taxonomic_name)
+          if (exists("cached_get_silhouette_data")) {
+            silhouette_result <- cached_get_silhouette_data(taxonomic_name)
             if (silhouette_result$success) {
               silhouette_html <- format_silhouette_html(silhouette_result)
               if (!is.null(silhouette_html) && nchar(silhouette_html) > 0) {
@@ -969,7 +976,7 @@ create_info_panel_data_parallel <- function(network_data, request_id = NULL) {
             }
           } else {
             # Function doesn't exist
-            node_info$silhouette_error <- "get_silhouette_data function not available"
+            node_info$silhouette_error <- "cached_get_silhouette_data function not available"
           }
         }, error = function(e) {
           # Capture the actual error for debugging
@@ -1124,11 +1131,11 @@ add_wikipedia_data <- function(node_info) {
     return(node_info)
   }
   
-  # Try to fetch Wikipedia data using the existing Wikipedia API function
+  # Try to fetch Wikipedia data using the cached Wikipedia API function
   tryCatch({
-    # Check if wikipedia API function exists
-    if (exists("get_wikipedia_intro")) {
-      wikipedia_result <- get_wikipedia_intro(taxonomic_name, truncate_length = 250)
+    # Check if cached wikipedia API function exists
+    if (exists("cached_get_wikipedia_intro")) {
+      wikipedia_result <- cached_get_wikipedia_intro(taxonomic_name, truncate_length = 250)
       
       if (wikipedia_result$success) {
         # Add Wikipedia data to node_info
@@ -1146,18 +1153,18 @@ add_wikipedia_data <- function(node_info) {
     }
   }, error = function(e) {
     # If there's an error, add error information
-    cat("Warning: Could not fetch Wikipedia data for", taxonomic_name, ":", e$message, "\n")
+    api_log_warn(paste("Could not fetch Wikipedia data for", taxonomic_name, ":", e$message))
     node_info$wikipedia_summary <- NULL
     node_info$wikipedia_url <- NULL
     node_info$wikipedia_title <- NULL
     node_info$wikipedia_error <- paste("Failed to connect to Wikipedia API:", e$message)
   })
   
-  # Try to fetch silhouette data using PhyloPic
+  # Try to fetch silhouette data using cached PhyloPic function
   tryCatch({
-    # Check if phylopic function exists
-    if (exists("get_silhouette_data")) {
-      silhouette_result <- get_silhouette_data(taxonomic_name)
+    # Check if cached phylopic function exists
+    if (exists("cached_get_silhouette_data")) {
+      silhouette_result <- cached_get_silhouette_data(taxonomic_name)
       
       if (silhouette_result$success) {
         # Format the silhouette HTML and add to node_info
@@ -1176,7 +1183,7 @@ add_wikipedia_data <- function(node_info) {
     }
   }, error = function(e) {
     # If there's an error, add error information
-    cat("Warning: Could not fetch silhouette data for", taxonomic_name, ":", e$message, "\n")
+    api_log_warn(paste("Could not fetch silhouette data for", taxonomic_name, ":", e$message))
     node_info$silhouette_html <- NULL
     node_info$silhouette_uuid <- NULL
     node_info$silhouette_attribution <- NULL
