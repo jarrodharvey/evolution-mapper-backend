@@ -169,10 +169,18 @@ has_extractable_taxonomic_name <- function(node_data) {
   if ("Name" %in% names(node_data) && !is.null(node_data$Name) && !is.na(node_data$Name)) {
     node_name <- as.character(node_data$Name)
     # Extract taxonomic name from hybrid format like "GroupName (age Mya)"
-    taxonomic_match <- regmatches(node_name, regexpr("^([A-Za-z][A-Za-z ]+?)\\.*\\.[0-9]+\\.[0-9]+\\.*Mya\\.$", node_name, perl = TRUE))
-    if (length(taxonomic_match) > 0) {
-      # Extract just the taxonomic part before the age
+    # Handle both parentheses format "Boreoeutheria (99.3 Mya)" and dot format
+    if (grepl("\\s*\\([0-9]+\\.?[0-9]*\\s+Mya\\)", node_name)) {
+      # Extract taxonomic part from parentheses format
+      taxonomic_name <- sub("\\s*\\([0-9]+\\.?[0-9]*\\s+Mya\\).*$", "", node_name)
+    } else if (grepl("\\.*\\.[0-9]+\\.[0-9]+\\.*Mya\\.", node_name)) {
+      # Extract taxonomic part from dot format (backward compatibility)
       taxonomic_name <- sub("\\.*\\.[0-9.]+\\.*Mya\\.$", "", node_name)
+    } else {
+      taxonomic_name <- node_name
+    }
+    taxonomic_name <- trimws(taxonomic_name)
+    if (nchar(taxonomic_name) > 0) {
       # Check if it's not a generic ancestor name
       return(!grepl("^(Ancestor|Node)\\.+[A-Z]$", taxonomic_name) && 
              !grepl("^Common ancestor", taxonomic_name) &&
@@ -946,14 +954,26 @@ create_info_panel_data_parallel <- function(network_data, request_id = NULL) {
             silhouette_result <- get_silhouette_data(taxonomic_name)
             if (silhouette_result$success) {
               silhouette_html <- format_silhouette_html(silhouette_result)
-              node_info$silhouette_html <- silhouette_html
-              node_info$silhouette_uuid <- silhouette_result$uuid
-              node_info$silhouette_attribution <- silhouette_result$attribution
-              phylopic_success <- TRUE
+              if (!is.null(silhouette_html) && nchar(silhouette_html) > 0) {
+                node_info$silhouette_html <- silhouette_html
+                node_info$silhouette_uuid <- silhouette_result$uuid
+                node_info$silhouette_attribution <- silhouette_result$attribution
+                phylopic_success <- TRUE
+              } else {
+                # silhouette_html is empty or NULL
+                node_info$silhouette_error <- "Empty silhouette HTML generated"
+              }
+            } else {
+              # silhouette_result failed
+              node_info$silhouette_error <- paste("Silhouette data failed:", silhouette_result$error)
             }
+          } else {
+            # Function doesn't exist
+            node_info$silhouette_error <- "get_silhouette_data function not available"
           }
         }, error = function(e) {
-          # If there's an error, just don't add silhouette data
+          # Capture the actual error for debugging
+          node_info$silhouette_error <- paste("PhyloPic error:", e$message)
         })
         
         return(list(
@@ -974,6 +994,7 @@ create_info_panel_data_parallel <- function(network_data, request_id = NULL) {
     # Apply the parallel results back to info_panel_data and collect stats
     wikipedia_successes <- 0
     phylopic_successes <- 0
+    phylopic_errors <- c()
     processed_taxonomic_names <- c()
     
     for (result in parallel_results) {
@@ -982,7 +1003,11 @@ create_info_panel_data_parallel <- function(network_data, request_id = NULL) {
       if (!is.null(result$taxonomic_name)) {
         processed_taxonomic_names <- c(processed_taxonomic_names, result$taxonomic_name)
         if (result$wikipedia_success) wikipedia_successes <- wikipedia_successes + 1
-        if (result$phylopic_success) phylopic_successes <- phylopic_successes + 1
+        if (result$phylopic_success) {
+          phylopic_successes <- phylopic_successes + 1
+        } else if (!is.null(result$node_info$silhouette_error)) {
+          phylopic_errors <- c(phylopic_errors, paste(result$taxonomic_name, ":", result$node_info$silhouette_error))
+        }
       }
     }
     
@@ -990,6 +1015,9 @@ create_info_panel_data_parallel <- function(network_data, request_id = NULL) {
     api_log_info(paste("[", request_id, "]   Taxonomic names processed:", length(processed_taxonomic_names)))
     api_log_info(paste("[", request_id, "]   Wikipedia successes:", wikipedia_successes, "/", length(processed_taxonomic_names)))
     api_log_info(paste("[", request_id, "]   PhyloPic successes:", phylopic_successes, "/", length(processed_taxonomic_names)))
+    if (length(phylopic_errors) > 0) {
+      api_log_info(paste("[", request_id, "]   PhyloPic errors:", paste(phylopic_errors, collapse = "; ")))
+    }
     
     if (length(processed_taxonomic_names) > 0) {
       api_log_info(paste("[", request_id, "]   Processed taxonomic groups:", paste(head(processed_taxonomic_names, 3), collapse = ', '), if(length(processed_taxonomic_names) > 3) '...' else '', sep=" "))
@@ -1016,9 +1044,13 @@ extract_taxonomic_name <- function(node_info) {
     return(NULL)
   }
   
-  # Extract taxonomic name from hybrid nodes like "Spermatophyta (352.2 Mya)"
-  if (grepl("\\.[0-9]+\\.[0-9]+\\.*Mya\\.", raw_name)) {
-    # Extract just the taxonomic part before the age
+  # Extract taxonomic name from hybrid nodes like "Spermatophyta (352.2 Mya)" or "Boreoeutheria (99.3 Mya)"
+  if (grepl("\\s*\\([0-9]+\\.?[0-9]*\\s+Mya\\)", raw_name)) {
+    # Extract just the taxonomic part before the age in parentheses
+    taxonomic_name <- sub("\\s*\\([0-9]+\\.?[0-9]*\\s+Mya\\).*$", "", raw_name)
+    taxonomic_name <- trimws(taxonomic_name)
+  } else if (grepl("\\.[0-9]+\\.[0-9]+\\.*Mya\\.", raw_name)) {
+    # Handle the old dot format for backward compatibility
     taxonomic_name <- sub("\\.*\\.[0-9]+\\.[0-9]+\\.*Mya\\.$", "", raw_name)
     taxonomic_name <- trimws(taxonomic_name)
   } else {
@@ -1071,9 +1103,13 @@ add_wikipedia_data <- function(node_info) {
     return(node_info)  # Return unchanged if no name found
   }
   
-  # Extract taxonomic name from hybrid nodes like "Spermatophyta (352.2 Mya)"
-  if (grepl("\\.[0-9]+\\.[0-9]+\\.*Mya\\.", raw_name)) {
-    # Extract just the taxonomic part before the age
+  # Extract taxonomic name from hybrid nodes like "Spermatophyta (352.2 Mya)" or "Boreoeutheria (99.3 Mya)"
+  if (grepl("\\s*\\([0-9]+\\.?[0-9]*\\s+Mya\\)", raw_name)) {
+    # Extract just the taxonomic part before the age in parentheses
+    taxonomic_name <- sub("\\s*\\([0-9]+\\.?[0-9]*\\s+Mya\\).*$", "", raw_name)
+    taxonomic_name <- trimws(taxonomic_name)
+  } else if (grepl("\\.[0-9]+\\.[0-9]+\\.*Mya\\.", raw_name)) {
+    # Handle the old dot format for backward compatibility
     taxonomic_name <- sub("\\.*\\.[0-9]+\\.[0-9]+\\.*Mya\\.$", "", raw_name)
     taxonomic_name <- trimws(taxonomic_name)
   } else {
