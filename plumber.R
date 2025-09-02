@@ -220,8 +220,8 @@ function(search = NULL, limit = 50) {
     
     if (is.null(search) || search == "") {
       query <- paste0(
-        "SELECT common, scientific, ott FROM (",
-        "  SELECT common, scientific, ott, ",
+        "SELECT common, scientific, ott, has_datelife FROM (",
+        "  SELECT common, scientific, ott, has_datelife, ",
         "  ROW_NUMBER() OVER (PARTITION BY common ORDER BY RANDOM()) as rn ",
         "  FROM species ",
         "  WHERE ott IS NOT NULL AND ott != '' AND common IS NOT NULL",
@@ -231,8 +231,8 @@ function(search = NULL, limit = 50) {
       )
     } else {
       query <- paste0(
-        "SELECT common, scientific, ott FROM (",
-        "  SELECT common, scientific, ott, ",
+        "SELECT common, scientific, ott, has_datelife FROM (",
+        "  SELECT common, scientific, ott, has_datelife, ",
         "  ROW_NUMBER() OVER (PARTITION BY common ORDER BY RANDOM()) as rn ",
         "  FROM species ",
         "  WHERE ott IS NOT NULL AND ott != '' AND common IS NOT NULL ",
@@ -318,7 +318,7 @@ function(count = NULL) {
     species_db <- dbConnect(SQLite(), db_path)
     
     query <- paste0(
-      "SELECT common, scientific FROM species ",
+      "SELECT common, scientific, has_datelife FROM species ",
       "WHERE ott IS NOT NULL AND ott != '' AND common IS NOT NULL ",
       "ORDER BY RANDOM() LIMIT ", count
     )
@@ -330,7 +330,8 @@ function(count = NULL) {
       success = TRUE,
       selected_species = list(
         common_names = random_species_data$common,
-        scientific_names = random_species_data$scientific
+        scientific_names = random_species_data$scientific,
+        has_datelife = random_species_data$has_datelife
       )
     ))
   }, error = function(e) {

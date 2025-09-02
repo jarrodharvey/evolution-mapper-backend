@@ -216,6 +216,18 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
   }
   
   tryCatch({
+    # Configure logging for future worker process - write to same log file as main process
+    if (exists("log_appender", mode = "function")) {
+      # Ensure logs directory exists in worker
+      if (!dir.exists("logs")) {
+        dir.create("logs", recursive = TRUE)
+      }
+      # Configure file appender to match main process logging
+      log_appender(appender_file("logs/api.log", append = TRUE), namespace = "evolution.api")
+      log_layout(layout_simple, namespace = "evolution.api")
+      log_threshold(INFO, namespace = "evolution.api")
+    }
+    
     api_log_info(paste("[", request_id, "] === STARTING HYBRID TREE GENERATION ===", sep=""))
     api_log_info(paste("[", request_id, "] Input:", length(common_names), "species"))
     api_log_info(paste("[", request_id, "] Common names:", paste(head(common_names, 5), collapse = ', '), if(length(common_names) > 5) '...' else '', sep=" "))
@@ -547,7 +559,7 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
     update_progress_internal("creating_visualization", "in_progress", 
                            list(step = "Creating hybrid tree visualization"))
     
-    tree_html <- create_hybrid_tree_visualization(network_data, request_id)
+    tree_html <- create_hybrid_tree_visualization(network_data, request_id, progress_token)
     
     step_duration <- as.numeric(difftime(Sys.time(), step_start, units = "secs"))
     api_log_info(paste("[", request_id, "] Visualization created - Duration:", round(step_duration, 3), "s"))
@@ -951,7 +963,7 @@ transform_hybrid_to_info_panel_format <- function(network_data) {
 #' @param network_data Network data frame with age information
 #' @param request_id Optional request ID for logging correlation
 #' @return HTML string for CollapsibleTree
-create_hybrid_tree_visualization <- function(network_data, request_id = NULL) {
+create_hybrid_tree_visualization <- function(network_data, request_id = NULL, progress_token = NULL) {
   if (is.null(request_id)) {
     request_id <- "viz_create"
   }
@@ -994,11 +1006,11 @@ create_hybrid_tree_visualization <- function(network_data, request_id = NULL) {
   # Transform network data to info panel format
   info_panel_network_data <- transform_hybrid_to_info_panel_format(network_data)
   
-  # Add info panel data to tree_data
-  tree_data <- add_info_panel_data(tree_data, info_panel_network_data, request_id)
+  # Add info panel data to tree_data with sequential processing and progress tracking
+  tree_data <- add_info_panel_data(tree_data, info_panel_network_data, request_id, progress_token)
   
-  # Use enhanced tree HTML generation with info panels
-  tree_html <- create_enhanced_tree_html(tree_data, info_panel_network_data, tree_widget, request_id)
+  # Use enhanced tree HTML generation with info panels and progress tracking
+  tree_html <- create_enhanced_tree_html(tree_data, info_panel_network_data, tree_widget, request_id, progress_token)
   
   
   return(tree_html)

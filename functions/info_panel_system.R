@@ -830,13 +830,32 @@ console.log("Info panel system initialized with server-side Wikipedia integratio
 }
 
 # Create info panel data for network
-# Parallel version of create_info_panel_data for improved performance
-create_info_panel_data_parallel <- function(network_data, request_id = NULL) {
+# Sequential version with natural rate limiting for improved reliability
+create_info_panel_data_sequential <- function(network_data, request_id = NULL, progress_token = NULL) {
   if (is.null(request_id)) {
     request_id <- "info_panel"
   }
   
-  api_log_info(paste("[", request_id, "] Starting info panel data creation...", sep=""))
+  # Helper function to update progress if token provided
+  update_progress_internal <- function(step_name, status = "completed", additional_data = NULL) {
+    if (!is.null(progress_token) && progress_token != "") {
+      update_progress(progress_token, step_name, status, additional_data)
+    }
+  }
+  
+  # Configure logging for future worker process - write to same log file as main process
+  if (exists("log_appender", mode = "function")) {
+    # Ensure logs directory exists in worker
+    if (!dir.exists("logs")) {
+      dir.create("logs", recursive = TRUE)
+    }
+    # Configure file appender to match main process logging
+    log_appender(appender_file("logs/api.log", append = TRUE), namespace = "evolution.api")
+    log_layout(layout_simple, namespace = "evolution.api")
+    log_threshold(INFO, namespace = "evolution.api")
+  }
+  
+  api_log_info(paste("[", request_id, "] Starting sequential info panel data creation...", sep=""))
   start_time <- Sys.time()
   
   # Handle both naming conventions: "to" (ROTL) and "Child" (DateLife)
@@ -880,163 +899,144 @@ create_info_panel_data_parallel <- function(network_data, request_id = NULL) {
   
   api_log_info(paste("[", request_id, "] Node classification:", species_count, "species,", ancestor_nodes, "ancestors (", taxonomic_nodes, "taxonomic,", non_taxonomic_ancestors, "non-taxonomic)"))
   
-  # If we have taxonomic nodes, process them in parallel
+  # Process taxonomic nodes sequentially with natural rate limiting
   if (length(taxonomic_indices) > 0) {
-    api_log_info(paste("[", request_id, "] Processing", length(taxonomic_indices), "taxonomic nodes in parallel (Wikipedia + PhyloPic data)..."))
+    api_log_info(paste("[", request_id, "] Processing", length(taxonomic_indices), "taxonomic nodes sequentially (PhyloPic → Wikipedia → PhyloPic → Wikipedia...)"))
     
-    parallel_start <- Sys.time()
-    # Create parallel cluster
-    num_cores <- min(length(taxonomic_indices), 4)
-    api_log_info(paste("[", request_id, "] Creating parallel cluster with", num_cores, "cores..."))
-    cl <- makeCluster(num_cores)
-    
-    # Export necessary functions and libraries to cluster nodes
-    api_log_info(paste("[", request_id, "] Setting up cluster workers...", sep=""))
-    cluster_setup_start <- Sys.time()
-    clusterEvalQ(cl, {
-      library(httr)
-      library(rphylopic)
-      library(png)
-      library(base64enc)
-      library(memoise)
-      library(cachem)
-    })
-    
-    # Source the necessary function files on each worker (including cached functions)
-    clusterEvalQ(cl, {
-      source("functions/logging_config.R")
-      source("functions/wikipedia_api.R")
-      source("functions/phylopic_silhouettes.R")
-      source("functions/cached_api_functions.R")
-    })
-    
-    clusterExport(cl, c(
-      "extract_taxonomic_name"
-    ), envir = environment())
-    
-    cluster_setup_duration <- as.numeric(difftime(Sys.time(), cluster_setup_start, units = "secs"))
-    api_log_info(paste("[", request_id, "] Cluster setup completed - Duration:", round(cluster_setup_duration, 3), "s"))
-    
-    # Process taxonomic nodes in parallel
-    api_log_info(paste("[", request_id, "] Launching parallel Wikipedia and PhyloPic queries...", sep=""))
-    parallel_results <- tryCatch({
-      parLapply(cl, taxonomic_node_info, function(item) {
-        node_info <- item$node_info
-        
-        # Extract taxonomic name
-        taxonomic_name <- extract_taxonomic_name(node_info)
-        
-        # Skip if it's a generic ancestor name
-        if (is.null(taxonomic_name) || 
-            grepl("^(Ancestor|Node)\\.+[A-Z]$", taxonomic_name) || 
-            grepl("^Common ancestor", taxonomic_name) ||
-            nchar(trimws(taxonomic_name)) <= 2) {
-          return(list(index = item$index, node_info = node_info, taxonomic_name = NULL))
-        }
-        
-        wikipedia_success <- FALSE
-        phylopic_success <- FALSE
-        
-        # Fetch Wikipedia and PhyloPic data sequentially within each parallel worker
-        # (simpler than nested parallelization, still faster overall since nodes are processed in parallel)
-        
-        # Try Wikipedia API call using cached function
-        tryCatch({
-          if (exists("cached_get_wikipedia_intro")) {
-            wikipedia_result <- cached_get_wikipedia_intro(taxonomic_name, truncate_length = 250)
-            if (wikipedia_result$success) {
-              node_info$wikipedia_summary <- wikipedia_result$introduction
-              node_info$wikipedia_url <- wikipedia_result$url
-              node_info$wikipedia_title <- wikipedia_result$wikipedia_title
-              wikipedia_success <- TRUE
-            }
-          }
-        }, error = function(e) {
-          # If there's an error, just don't add Wikipedia data
-        })
-        
-        # Try PhyloPic API call using cached function
-        tryCatch({
-          if (exists("cached_get_silhouette_data")) {
-            silhouette_result <- cached_get_silhouette_data(taxonomic_name)
-            if (silhouette_result$success) {
-              silhouette_html <- format_silhouette_html(silhouette_result)
-              if (!is.null(silhouette_html) && nchar(silhouette_html) > 0) {
-                node_info$silhouette_html <- silhouette_html
-                node_info$silhouette_uuid <- silhouette_result$uuid
-                node_info$silhouette_attribution <- silhouette_result$attribution
-                phylopic_success <- TRUE
-              } else {
-                # silhouette_html is empty or NULL
-                node_info$silhouette_error <- "Empty silhouette HTML generated"
-              }
-            } else {
-              # silhouette_result failed
-              node_info$silhouette_error <- paste("Silhouette data failed:", silhouette_result$error)
-            }
-          } else {
-            # Function doesn't exist
-            node_info$silhouette_error <- "cached_get_silhouette_data function not available"
-          }
-        }, error = function(e) {
-          # Capture the actual error for debugging
-          node_info$silhouette_error <- paste("PhyloPic error:", e$message)
-        })
-        
-        return(list(
-          index = item$index, 
-          node_info = node_info, 
-          taxonomic_name = taxonomic_name,
-          wikipedia_success = wikipedia_success,
-          phylopic_success = phylopic_success
-        ))
-      })
-    }, finally = {
-      stopCluster(cl)
-    })
-    
-    parallel_duration <- as.numeric(difftime(Sys.time(), parallel_start, units = "secs"))
-    api_log_info(paste("[", request_id, "] Parallel processing completed - Duration:", round(parallel_duration, 3), "s"))
-    
-    # Apply the parallel results back to info_panel_data and collect stats
     wikipedia_successes <- 0
     phylopic_successes <- 0
     phylopic_errors <- c()
     processed_taxonomic_names <- c()
     
-    for (result in parallel_results) {
-      info_panel_data[result$index] <- format_panel_content(result$node_info)
+    sequential_start <- Sys.time()
+    
+    # Sequential processing: PhyloPic → Wikipedia → PhyloPic → Wikipedia
+    for (i in seq_along(taxonomic_node_info)) {
+      item <- taxonomic_node_info[[i]]
+      node_info <- item$node_info
       
-      if (!is.null(result$taxonomic_name)) {
-        processed_taxonomic_names <- c(processed_taxonomic_names, result$taxonomic_name)
-        if (result$wikipedia_success) wikipedia_successes <- wikipedia_successes + 1
-        if (result$phylopic_success) {
-          phylopic_successes <- phylopic_successes + 1
-        } else if (!is.null(result$node_info$silhouette_error)) {
-          phylopic_errors <- c(phylopic_errors, paste(result$taxonomic_name, ":", result$node_info$silhouette_error))
-        }
+      # Extract taxonomic name
+      taxonomic_name <- extract_taxonomic_name(node_info)
+      
+      # Skip if it's a generic ancestor name
+      if (is.null(taxonomic_name) || 
+          grepl("^(Ancestor|Node)\\.+[A-Z]$", taxonomic_name) || 
+          grepl("^Common ancestor", taxonomic_name) ||
+          nchar(trimws(taxonomic_name)) <= 2) {
+        info_panel_data[item$index] <- format_panel_content(node_info)
+        next
       }
+      
+      api_log_info(paste("[", request_id, "] Processing taxonomic node", i, "of", length(taxonomic_node_info), ":", taxonomic_name))
+      processed_taxonomic_names <- c(processed_taxonomic_names, taxonomic_name)
+      
+      wikipedia_success <- FALSE
+      phylopic_success <- FALSE
+      node_start_time <- Sys.time()
+      
+      # 1. PhyloPic API call first (with timeout protection)
+      api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Fetching PhyloPic data for:", taxonomic_name))
+      phylopic_start <- Sys.time()
+      tryCatch({
+        if (exists("cached_get_silhouette_data")) {
+          silhouette_result <- cached_get_silhouette_data(taxonomic_name)
+          if (silhouette_result$success) {
+            silhouette_html <- format_silhouette_html(silhouette_result)
+            if (!is.null(silhouette_html) && nchar(silhouette_html) > 0) {
+              node_info$silhouette_html <- silhouette_html
+              node_info$silhouette_uuid <- silhouette_result$uuid
+              node_info$silhouette_attribution <- silhouette_result$attribution
+              phylopic_success <- TRUE
+              phylopic_successes <- phylopic_successes + 1
+              api_log_info(paste("[", request_id, "] PhyloPic success for:", taxonomic_name, "(", round(as.numeric(difftime(Sys.time(), phylopic_start, units = "secs")), 3), "s)"))
+            } else {
+              node_info$silhouette_error <- "Empty silhouette HTML generated"
+              phylopic_errors <- c(phylopic_errors, paste(taxonomic_name, ": Empty HTML"))
+              api_log_info(paste("[", request_id, "] PhyloPic empty result for:", taxonomic_name))
+            }
+          } else {
+            node_info$silhouette_error <- paste("Silhouette data failed:", silhouette_result$error)
+            phylopic_errors <- c(phylopic_errors, paste(taxonomic_name, ":", silhouette_result$error))
+            api_log_info(paste("[", request_id, "] PhyloPic failed for:", taxonomic_name, "-", silhouette_result$error))
+          }
+        }
+      }, error = function(e) {
+        node_info$silhouette_error <- paste("PhyloPic error:", e$message)
+        phylopic_errors <- c(phylopic_errors, paste(taxonomic_name, ":", e$message))
+        api_log_error(paste("[", request_id, "] PhyloPic error for:", taxonomic_name, "-", e$message))
+      })
+      
+      # 2. Wikipedia API call second (natural rate limiting)
+      api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Fetching Wikipedia data for:", taxonomic_name))
+      wikipedia_start <- Sys.time()
+      tryCatch({
+        if (exists("cached_get_wikipedia_intro")) {
+          wikipedia_result <- cached_get_wikipedia_intro(taxonomic_name, truncate_length = 250)
+          if (wikipedia_result$success) {
+            node_info$wikipedia_summary <- wikipedia_result$introduction
+            node_info$wikipedia_url <- wikipedia_result$url
+            node_info$wikipedia_title <- wikipedia_result$wikipedia_title
+            wikipedia_success <- TRUE
+            wikipedia_successes <- wikipedia_successes + 1
+            api_log_info(paste("[", request_id, "] Wikipedia success for:", taxonomic_name, "(", round(as.numeric(difftime(Sys.time(), wikipedia_start, units = "secs")), 3), "s)"))
+          } else {
+            api_log_info(paste("[", request_id, "] Wikipedia failed for:", taxonomic_name, "-", wikipedia_result$error))
+          }
+        }
+      }, error = function(e) {
+        api_log_error(paste("[", request_id, "] Wikipedia error for:", taxonomic_name, "-", e$message))
+      })
+      
+      # Generate final panel content for this node
+      info_panel_data[item$index] <- format_panel_content(node_info)
+      
+      node_duration <- as.numeric(difftime(Sys.time(), node_start_time, units = "secs"))
+      api_log_info(paste("[", request_id, "] Completed taxonomic node", i, ":", taxonomic_name, "- Duration:", round(node_duration, 3), "s"))
+      
+      # Update progress after each taxonomic node is completed
+      update_progress_internal("taxonomic_data_fetching", "in_progress", 
+                             list(completed_nodes = i, 
+                                  total_nodes = length(taxonomic_node_info),
+                                  current_node = taxonomic_name,
+                                  wikipedia_successes = wikipedia_successes,
+                                  phylopic_successes = phylopic_successes))
     }
     
-    api_log_info(paste("[", request_id, "] Parallel processing results:", sep=""))
+    sequential_duration <- as.numeric(difftime(Sys.time(), sequential_start, units = "secs"))
+    api_log_info(paste("[", request_id, "] Sequential processing completed - Duration:", round(sequential_duration, 3), "s"))
+    
+    api_log_info(paste("[", request_id, "] Sequential processing results:", sep=""))
     api_log_info(paste("[", request_id, "]   Taxonomic names processed:", length(processed_taxonomic_names)))
     api_log_info(paste("[", request_id, "]   Wikipedia successes:", wikipedia_successes, "/", length(processed_taxonomic_names)))
     api_log_info(paste("[", request_id, "]   PhyloPic successes:", phylopic_successes, "/", length(processed_taxonomic_names)))
     if (length(phylopic_errors) > 0) {
-      api_log_info(paste("[", request_id, "]   PhyloPic errors:", paste(phylopic_errors, collapse = "; ")))
+      api_log_info(paste("[", request_id, "]   PhyloPic errors:", paste(head(phylopic_errors, 3), collapse = "; "), if(length(phylopic_errors) > 3) '...' else ''))
     }
     
     if (length(processed_taxonomic_names) > 0) {
       api_log_info(paste("[", request_id, "]   Processed taxonomic groups:", paste(head(processed_taxonomic_names, 3), collapse = ', '), if(length(processed_taxonomic_names) > 3) '...' else '', sep=" "))
     }
+    
+    # Mark taxonomic data fetching as completed
+    update_progress_internal("taxonomic_data_fetching", "completed", 
+                           list(total_processed = length(processed_taxonomic_names),
+                                wikipedia_successes = wikipedia_successes,
+                                phylopic_successes = phylopic_successes,
+                                duration_seconds = round(sequential_duration, 3)))
   } else {
-    api_log_info(paste("[", request_id, "] No taxonomic nodes requiring external data - skipping parallel processing", sep=""))
+    api_log_info(paste("[", request_id, "] No taxonomic nodes requiring external data - skipping external API calls", sep=""))
   }
   
   total_duration <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
-  api_log_info(paste("[", request_id, "] Info panel creation completed - Total Duration:", round(total_duration, 3), "s"))
+  api_log_info(paste("[", request_id, "] Sequential info panel creation completed - Total Duration:", round(total_duration, 3), "s"))
   
   return(info_panel_data)
+}
+
+# Keep the old parallel function for backwards compatibility but mark as deprecated
+create_info_panel_data_parallel <- function(network_data, request_id = NULL) {
+  api_log_warn(paste("[", request_id, "] create_info_panel_data_parallel is deprecated - using sequential version for stability"))
+  return(create_info_panel_data_sequential(network_data, request_id))
 }
 
 # Helper function to extract taxonomic name from node info

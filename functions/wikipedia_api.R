@@ -1,5 +1,8 @@
 # Wikipedia API Functions
 # Functions for fetching Wikipedia article introductions for taxonomic groups
+# Uses httr2 for improved timeout and error handling
+
+library(httr2)
 
 # Main function to fetch Wikipedia introduction for a taxonomic group
 get_wikipedia_intro <- function(taxonomic_group, truncate_length = 300) {
@@ -83,12 +86,15 @@ search_wikipedia_article <- function(search_term) {
     # Try direct page lookup first (more reliable)
     direct_url <- paste0(base_url, URLencode(gsub(" ", "_", search_term)))
     
-    # Make HTTP request with User-Agent header (Wikipedia requires this)
-    response <- httr::GET(direct_url, httr::user_agent("Evolution-Mapper-API/1.0"))
+    # Make HTTP request with User-Agent header and timeout (Wikipedia requires User-Agent)
+    response <- request(direct_url) |>
+      req_user_agent("Evolution-Mapper-API/1.0") |>
+      req_timeout(10) |>
+      req_error(is_error = ~ FALSE) |>  # Handle errors manually
+      req_perform()
     
-    if (httr::status_code(response) == 200) {
-      content <- httr::content(response, "text", encoding = "UTF-8")
-      page_data <- jsonlite::fromJSON(content)
+    if (resp_status(response) == 200) {
+      page_data <- resp_body_json(response)
       
       # Return in consistent format
       return(list(
@@ -103,21 +109,25 @@ search_wikipedia_article <- function(search_term) {
     # If direct lookup fails, try search API
     search_url <- "https://en.wikipedia.org/w/api.php"
     
-    response <- httr::GET(search_url, query = list(
-      action = "query",
-      format = "json",
-      list = "search",
-      srsearch = search_term,
-      srlimit = 1,
-      srprop = "snippet"
-    ), httr::user_agent("Evolution-Mapper-API/1.0"))
+    response <- request(search_url) |>
+      req_url_query(
+        action = "query",
+        format = "json",
+        list = "search",
+        srsearch = search_term,
+        srlimit = 1,
+        srprop = "snippet"
+      ) |>
+      req_user_agent("Evolution-Mapper-API/1.0") |>
+      req_timeout(10) |>
+      req_error(is_error = ~ FALSE) |>  # Handle errors manually
+      req_perform()
     
-    if (httr::status_code(response) != 200) {
+    if (resp_status(response) != 200) {
       return(NULL)
     }
     
-    content <- httr::content(response, "text", encoding = "UTF-8")
-    search_data <- jsonlite::fromJSON(content)
+    search_data <- resp_body_json(response)
     
     if (length(search_data$query$search) == 0) {
       return(NULL)
@@ -146,14 +156,17 @@ get_wikipedia_extract <- function(page_title, max_chars = 300) {
     base_url <- "https://en.wikipedia.org/api/rest_v1/page/summary/"
     url <- paste0(base_url, URLencode(gsub(" ", "_", page_title)))
     
-    response <- httr::GET(url, httr::user_agent("Evolution-Mapper-API/1.0"))
+    response <- request(url) |>
+      req_user_agent("Evolution-Mapper-API/1.0") |>
+      req_timeout(10) |>
+      req_error(is_error = ~ FALSE) |>  # Handle errors manually
+      req_perform()
     
-    if (httr::status_code(response) != 200) {
+    if (resp_status(response) != 200) {
       return(NULL)
     }
     
-    content <- httr::content(response, "text", encoding = "UTF-8")
-    page_data <- jsonlite::fromJSON(content)
+    page_data <- resp_body_json(response)
     
     if (is.null(page_data$extract) || page_data$extract == "") {
       return(NULL)

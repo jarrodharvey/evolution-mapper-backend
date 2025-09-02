@@ -9,10 +9,11 @@ source("functions/info_panel_system.R")
 #' @param tree_data Data frame with Parent, Child columns for collapsibleTreeNetwork
 #' @param network_data Network data with node information for info panels
 #' @param request_id Optional request ID for logging correlation
+#' @param progress_token Optional progress token for tracking external API calls
 #' @return Enhanced tree_data with InfoPanel column
-add_info_panel_data <- function(tree_data, network_data, request_id = NULL) {
-  # Create info panel data for ancestor nodes using parallel processing
-  info_panels <- create_info_panel_data_parallel(network_data, request_id = request_id)
+add_info_panel_data <- function(tree_data, network_data, request_id = NULL, progress_token = NULL) {
+  # Create info panel data for ancestor nodes using sequential processing (prevents API hangs)
+  info_panels <- create_info_panel_data_sequential(network_data, request_id = request_id, progress_token = progress_token)
   
   # Add InfoPanel column to tree data
   tree_data$InfoPanel <- info_panels
@@ -532,8 +533,10 @@ enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, c
 #' @param tree_data Data frame with Parent, Child columns (should already have InfoPanel data)
 #' @param network_data Network data with node information (for debugging)
 #' @param tree_widget collapsibleTreeNetwork widget created with InfoPanel data
+#' @param request_id Optional request ID for logging correlation
+#' @param progress_token Optional progress token for tracking external API calls
 #' @return Enhanced HTML with info panel system
-create_enhanced_tree_html <- function(tree_data, network_data, tree_widget, request_id = NULL) {
+create_enhanced_tree_html <- function(tree_data, network_data, tree_widget, request_id = NULL, progress_token = NULL) {
   
   # Convert to HTML using temporary file approach
   temp_file <- tempfile(fileext = ".html")
@@ -541,8 +544,8 @@ create_enhanced_tree_html <- function(tree_data, network_data, tree_widget, requ
   tree_html <- paste(readLines(temp_file), collapse = "\n")
   unlink(temp_file)  # Clean up temp file
   
-  # Generate cached info panel data ONCE to avoid duplicate API calls
-  cached_info_panels <- create_info_panel_data_parallel(network_data, request_id = request_id)
+  # Generate cached info panel data ONCE using sequential processing (prevents API hangs)
+  cached_info_panels <- create_info_panel_data_sequential(network_data, request_id = request_id, progress_token = progress_token)
   
   # Enhance HTML with info panel system using cached data
   enhanced_html <- enhance_tree_html_with_info_panels_cached(tree_html, network_data, cached_info_panels)
