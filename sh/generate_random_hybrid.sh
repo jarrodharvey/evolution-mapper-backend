@@ -8,12 +8,13 @@ pkill -f "tail -f logs/api.log" 2>/dev/null || true
 
 # Generate random hybrid phylogenetic tree HTML using /api/full-tree-dated
 # Combines ROTL topology with DateLife ages where available
-# Usage: ./sh/generate_random_hybrid.sh [count] [output_file] [--simple]
+# Usage: ./sh/generate_random_hybrid.sh [count] [output_file] [--simple] [--progress]
 #
 # Arguments:
 #   count: Number of species (3-20, default random between 4-12)
 #   output_file: Output HTML file (default sh/random_hybrid_tree.html)
 #   --simple: Use predefined simple species set (chicken, human, chimpanzee)
+#   --progress: Use progress tracking instead of log streaming
 
 # Get API key from .Renviron file
 if [[ -f ".Renviron" ]]; then
@@ -31,6 +32,7 @@ fi
 
 # Parse command line arguments
 USE_SIMPLE=false
+USE_PROGRESS=false
 COUNT=""
 OUTPUT_FILE=""
 
@@ -39,6 +41,9 @@ for arg in "$@"; do
     case $arg in
         --simple)
             USE_SIMPLE=true
+            ;;
+        --progress)
+            USE_PROGRESS=true
             ;;
         *)
             if [[ -z "$COUNT" && "$arg" =~ ^[0-9]+$ ]]; then
@@ -97,6 +102,31 @@ else
     echo "   Or use the background version:"
     echo "   R --no-restore --no-save -e \"library(plumber); pr <- plumb('plumber.R'); pr\\\$run(port = 8000, host = '127.0.0.1')\" &"
     exit 1
+fi
+
+# Get progress token if --progress flag is used
+PROGRESS_TOKEN=""
+if [[ "$USE_PROGRESS" == true ]]; then
+    echo ""
+    echo "🎯 Getting progress token for real-time monitoring..."
+    
+    PROGRESS_RESPONSE=$(curl -s -H "X-API-Key: $API_KEY" "http://localhost:8000/api/get_progress_token")
+    
+    if echo "$PROGRESS_RESPONSE" | jq -r '.success' | grep -q "true"; then
+        PROGRESS_TOKEN=$(echo "$PROGRESS_RESPONSE" | jq -r 'if (.token | type) == "array" then .token[0] else .token end')
+        echo "✅ Progress token obtained: $PROGRESS_TOKEN"
+        
+        # Check if any cleanup occurred
+        CLEANUP_COUNT=$(echo "$PROGRESS_RESPONSE" | jq -r '.cleanup_info.files_cleaned // 0')
+        if [[ "$CLEANUP_COUNT" != "0" ]]; then
+            echo "🧹 Cleaned up $CLEANUP_COUNT old progress files"
+        fi
+    else
+        echo "❌ Failed to get progress token"
+        ERROR_MSG=$(echo "$PROGRESS_RESPONSE" | jq -r '.error // "Unknown error"')
+        echo "📝 Error: $ERROR_MSG"
+        exit 1
+    fi
 fi
 
 # Step 1: Select species (random or simple)
@@ -180,44 +210,95 @@ echo ""
 # Create a temporary file for the response
 TEMP_RESPONSE=$(mktemp)
 
-echo "🚀 Starting API request and streaming logs..."
+if [[ "$USE_PROGRESS" == true ]]; then
+    echo "🚀 Starting API request with progress monitoring..."
+else
+    echo "🚀 Starting API request and streaming logs..."
+fi
+
+# Build API request data
+API_DATA="common_names=$COMMON_LIST&scientific_names=$SCIENTIFIC_LIST"
+if [[ -n "$PROGRESS_TOKEN" ]]; then
+    API_DATA="${API_DATA}&progress_token=$PROGRESS_TOKEN"
+    # Add throttle for better progress monitoring visibility
+    API_DATA="${API_DATA}&throttle_secs=3"
+fi
 
 # Start curl in background and write to temp file
 (curl -s -X POST \
     -H "X-API-Key: $API_KEY" \
     -H "Content-Type: application/x-www-form-urlencoded" \
-    -d "common_names=$COMMON_LIST&scientific_names=$SCIENTIFIC_LIST" \
+    -d "$API_DATA" \
     "http://localhost:8000/api/full-tree-dated" > "$TEMP_RESPONSE") &
 
 CURL_PID=$!
 
-# Stream server logs while waiting with color coding
-(tail -f logs/api.log | while IFS= read -r line; do
-    # Color coding for different log levels and patterns
-    if [[ "$line" =~ ERROR|Error|error ]]; then
-        echo -e "\033[31m$line\033[0m"  # Red for errors
-    elif [[ "$line" =~ WARN|Warning|warning ]]; then
-        echo -e "\033[33m$line\033[0m"  # Yellow for warnings
-    elif [[ "$line" =~ INFO|Info|info|Starting|Finished|Success|Complete ]]; then
-        echo -e "\033[32m$line\033[0m"  # Green for info/success
-    elif [[ "$line" =~ DEBUG|Debug|debug ]]; then
-        echo -e "\033[36m$line\033[0m"  # Cyan for debug
-    elif [[ "$line" =~ "API call"|"Endpoint"|"Request"|"Response" ]]; then
-        echo -e "\033[35m$line\033[0m"  # Magenta for API-related
-    elif [[ "$line" =~ "DateLife"|"ROTL"|"Wikipedia"|"PhyloPic" ]]; then
-        echo -e "\033[34m$line\033[0m"  # Blue for external services
-    else
-        echo "$line"  # Default color for other lines
-    fi
-done) &
-TAIL_PID=$!
+# Monitor progress or stream logs
+if [[ "$USE_PROGRESS" == true ]]; then
+    echo "📊 Monitoring progress in real-time using /api/progress..."
+    echo "🎯 Progress token: $PROGRESS_TOKEN"
+    echo ""
+    
+    # Progress monitoring loop that exits when complete (now works thanks to multithreading!)
+    (while true; do
+        echo "=== Latest Progress Step $(date '+%H:%M:%S') ==="
+        RESPONSE=$(curl -s -H "X-API-Key: $API_KEY" "http://localhost:8000/api/progress?progress_token=$PROGRESS_TOKEN")
+        
+        if [[ -n "$RESPONSE" ]] && echo "$RESPONSE" | jq -e '.steps' > /dev/null 2>&1; then
+            if echo "$RESPONSE" | jq -e '.steps | length > 0' > /dev/null 2>&1; then
+                LATEST_STEP=$(echo "$RESPONSE" | jq '.steps[-1]')
+                echo "$LATEST_STEP"
+                
+                # Check if the request is completed
+                if echo "$LATEST_STEP" | jq -e '.step == "request_completed"' > /dev/null 2>&1; then
+                    echo ""
+                    echo "✅ Progress monitoring complete!"
+                    break
+                fi
+            else
+                echo '{"step": "waiting", "status": "no_steps_yet"}'
+            fi
+        else
+            echo "$RESPONSE" | jq 'if .token then {"step": "initializing", "status": .status, "token": .token} else . end'
+        fi
+        echo ""
+        sleep 1
+    done) &
+    WATCH_PID=$!
+else
+    # Stream server logs while waiting with color coding
+    (tail -f logs/api.log | while IFS= read -r line; do
+        # Color coding for different log levels and patterns
+        if [[ "$line" =~ ERROR|Error|error ]]; then
+            echo -e "\033[31m$line\033[0m"  # Red for errors
+        elif [[ "$line" =~ WARN|Warning|warning ]]; then
+            echo -e "\033[33m$line\033[0m"  # Yellow for warnings
+        elif [[ "$line" =~ INFO|Info|info|Starting|Finished|Success|Complete ]]; then
+            echo -e "\033[32m$line\033[0m"  # Green for info/success
+        elif [[ "$line" =~ DEBUG|Debug|debug ]]; then
+            echo -e "\033[36m$line\033[0m"  # Cyan for debug
+        elif [[ "$line" =~ "API call"|"Endpoint"|"Request"|"Response" ]]; then
+            echo -e "\033[35m$line\033[0m"  # Magenta for API-related
+        elif [[ "$line" =~ "DateLife"|"ROTL"|"Wikipedia"|"PhyloPic" ]]; then
+            echo -e "\033[34m$line\033[0m"  # Blue for external services
+        else
+            echo "$line"  # Default color for other lines
+        fi
+    done) &
+    TAIL_PID=$!
+fi
 
 # Wait for curl to complete
 wait $CURL_PID
 CURL_EXIT_CODE=$?
 
-# Stop log streaming
-kill $TAIL_PID 2>/dev/null
+# Stop monitoring/log streaming
+if [[ "$USE_PROGRESS" == true ]]; then
+    kill $WATCH_PID 2>/dev/null
+    echo "📊 Final progress check..."
+else
+    kill $TAIL_PID 2>/dev/null
+fi
 
 if [[ $CURL_EXIT_CODE -ne 0 ]]; then
     echo "❌ Network request failed (exit code: $CURL_EXIT_CODE)"

@@ -15,6 +15,9 @@ library(memoise)
 # Source shared logging configuration
 source("functions/logging_config.R")
 
+# Source progress tracking functions
+source("functions/progress_tracking.R")
+
 source("functions/rotl_tree_generation.R")
 source("functions/datelife_tree_generation.R")  # For optimized DateLife functions
 source("functions/datelife_efficiency.R")  # For DateLife efficiency optimizations
@@ -194,9 +197,22 @@ calculate_dynamic_link_length_hybrid <- function(network_data, base_length = 100
 #' @param scientific_names Vector of scientific names provided by user
 #' @param request_id Optional request ID for logging correlation
 #' @return List with success status and HTML or error message
-generate_hybrid_tree_html <- function(common_names, scientific_names, request_id = NULL) {
+generate_hybrid_tree_html <- function(common_names, scientific_names, request_id = NULL, progress_token = NULL, throttle_secs = 0) {
   if (is.null(request_id)) {
     request_id <- paste0("hybrid_", format(Sys.time(), "%H%M%S"))
+  }
+  
+  # Helper function to update progress if token provided
+  update_progress_internal <- function(step_name, status = "completed", additional_data = NULL) {
+    if (!is.null(progress_token) && progress_token != "") {
+      # Call the global update_progress function
+      update_progress(progress_token, step_name, status, additional_data)
+      
+      # Add throttle delay if specified (for testing progress monitoring)
+      if (throttle_secs > 0) {
+        Sys.sleep(throttle_secs)
+      }
+    }
   }
   
   tryCatch({
@@ -222,6 +238,12 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
     step_duration <- as.numeric(difftime(Sys.time(), step_start, units = "secs"))
     api_log_info(paste("[", request_id, "] Database lookup completed - Found", nrow(valid_species), "/", nrow(species_data), "valid OTT IDs - Duration:", round(step_duration, 3), "s"))
     api_log_info(paste("[", request_id, "] DateLife availability: ", efficiency_stats$datelife_available_count, "/", efficiency_stats$valid_species_count, " species (", efficiency_stats$datelife_percentage, "%)", sep=""))
+    
+    update_progress_internal("database_lookup", "completed", 
+                           list(valid_species = nrow(valid_species), 
+                                total_species = nrow(species_data),
+                                datelife_available = efficiency_stats$datelife_available_count,
+                                duration_seconds = round(step_duration, 3)))
     
     if (nrow(valid_species) < 2) {
       # Find missing species for both OTT ID lookup and consistency with /api/dated-tree format
@@ -266,6 +288,8 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
       
     } else {
       api_log_info(paste("[", request_id, "] STEP 2: Running ROTL and filtered DateLife queries in parallel...", sep=""))
+      update_progress_internal("parallel_queries", "in_progress", 
+                             list(step = "ROTL and DateLife queries"))
       
       # Get filtered scientific names for DateLife (efficiency optimization)
       datelife_scientific_names <- get_datelife_scientific_names(species_data, request_id)
@@ -342,6 +366,9 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
     step_duration <- as.numeric(difftime(Sys.time(), step_start, units = "secs"))
     api_log_info(paste("[", request_id, "] Step 2 completed - Duration:", round(step_duration, 3), "s", sep=""))
     
+    update_progress_internal("parallel_queries", "completed", 
+                           list(duration_seconds = round(step_duration, 3)))
+    
     api_log_info(paste("[", request_id, "] Processing parallel results...", sep=""))
     
     # Handle ROTL result
@@ -412,6 +439,8 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
     # Step 3: Create age mapping from DateLife data
     step_start <- Sys.time()
     api_log_info(paste("[", request_id, "] STEP 3: Processing DateLife age data...", sep=""))
+    update_progress_internal("datelife_processing", "in_progress", 
+                           list(step = "Processing DateLife age data"))
     
     datelife_phylo <- NULL
     datelife_species <- c()
@@ -478,9 +507,15 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
     step_duration <- as.numeric(difftime(Sys.time(), step_start, units = "secs"))
     api_log_info(paste("[", request_id, "] Step 3 completed - Duration:", round(step_duration, 3), "s"))
     
+    update_progress_internal("datelife_processing", "completed", 
+                           list(duration_seconds = round(step_duration, 3),
+                                chronograms_found = if(!is.null(datelife_result_wrapper$result) && length(datelife_result_wrapper$result) > 0) length(datelife_result_wrapper$result) else 0))
+    
     # Step 4: Convert ROTL tree to network format with hybrid age information
     step_start <- Sys.time()
     api_log_info(paste("[", request_id, "] STEP 4: Converting ROTL tree to network format with age information...", sep=""))
+    update_progress_internal("network_conversion", "in_progress", 
+                           list(step = "Converting ROTL tree to network format"))
     
     network_data <- convert_phylo_to_network_hybrid(rotl_tree, valid_species, datelife_species, ancestor_ages, request_id)
     
@@ -500,14 +535,25 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
     total_nodes <- nrow(network_data)
     api_log_info(paste("[", request_id, "] Age coverage:", nodes_with_ages, "/", total_nodes, "nodes have age information"))
     
+    update_progress_internal("network_conversion", "completed", 
+                           list(duration_seconds = round(step_duration, 3),
+                                edges_created = nrow(network_data),
+                                nodes_with_ages = nodes_with_ages,
+                                total_nodes = total_nodes))
+    
     # Step 5: Create visualization
     step_start <- Sys.time()
     api_log_info(paste("[", request_id, "] STEP 5: Creating hybrid tree visualization...", sep=""))
+    update_progress_internal("creating_visualization", "in_progress", 
+                           list(step = "Creating hybrid tree visualization"))
     
     tree_html <- create_hybrid_tree_visualization(network_data, request_id)
     
     step_duration <- as.numeric(difftime(Sys.time(), step_start, units = "secs"))
     api_log_info(paste("[", request_id, "] Visualization created - Duration:", round(step_duration, 3), "s"))
+    
+    update_progress_internal("creating_visualization", "completed", 
+                           list(duration_seconds = round(step_duration, 3)))
     
     # Determine which species are missing age data (similar to /api/dated-tree)
     api_log_info(paste("[", request_id, "] Analyzing age data coverage...", sep=""))

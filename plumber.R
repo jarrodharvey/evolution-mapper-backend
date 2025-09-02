@@ -31,6 +31,12 @@ function(req, res) {
 # Source logging configuration first
 source("functions/logging_config.R")
 
+# Source progress tracking functions
+source("functions/progress_tracking.R")
+
+# Source parallel processing configuration
+source("functions/parallel_config.R")
+
 # Source tree generation functions
 source("functions/rotl_tree_generation.R")
 source("functions/datelife_tree_generation.R")
@@ -42,6 +48,9 @@ library(DBI)
 library(RSQLite)
 library(jsonlite)
 library(httr)
+
+# Configure JSON serializer to prevent array wrapping
+#* @serializer unboxedJSON
 
 # Shared function for parsing species input (used by both APIs)
 parse_species_input <- function(input) {
@@ -64,6 +73,7 @@ clean_scientific_names <- function(scientific_names) {
   cleaned <- trimws(cleaned)  # Remove any trailing whitespace
   return(cleaned)
 }
+
 
 # Simple in-memory rate limiting - tracks requests per IP
 rate_limit_storage <- new.env()
@@ -120,6 +130,12 @@ function(req, res) {
 #* Rate limiting filter - prevents API abuse
 #* @filter ratelimit
 function(req, res) {
+  # Skip rate limiting for progress endpoint (needed for frequent polling)
+  if (req$PATH_INFO == "/api/progress") {
+    forward()
+    return()
+  }
+  
   # Use IP address as the identifier for rate limiting
   client_ip <- req$REMOTE_ADDR %||% "unknown"
   current_time <- as.numeric(Sys.time())
@@ -607,20 +623,41 @@ function(req, common_names = NULL, scientific_names = NULL, allow_partial_respon
 #* Generate hybrid phylogenetic tree with complete ROTL structure and DateLife ages where available
 #* @param common_names A JSON array of species common names
 #* @param scientific_names A JSON array of species scientific names (must match common_names length)
+#* @param progress_token Optional progress token for tracking tree generation steps
 #* @post /api/full-tree-dated
-function(req, common_names = NULL, scientific_names = NULL) {
+function(req, common_names = NULL, scientific_names = NULL, progress_token = NULL, throttle_secs = NULL) {
+  # Use future_promise for asynchronous processing to allow concurrent requests
+  promises::future_promise({
   request_id <- paste0("req_", format(Sys.time(), "%Y%m%d_%H%M%S_"), sample(1000:9999, 1))
   
   api_log_info(paste("=== START POST /api/full-tree-dated [Request ID:", request_id, "] ==="))
   api_log_info(paste("Request received from IP:", req$REMOTE_ADDR %||% 'unknown'))
   api_log_info(paste("API Key:", substr(req$api_key %||% 'none', 1, 8), "..."))
+  api_log_info(paste("Progress Token:", ifelse(is.null(progress_token) || progress_token == "", "none", progress_token)))
+  
+  # Parse and validate throttle parameter
+  throttle_seconds <- 0
+  if (!is.null(throttle_secs) && throttle_secs != "") {
+    throttle_seconds <- as.numeric(throttle_secs)
+    if (is.na(throttle_seconds) || throttle_seconds < 0 || throttle_seconds > 10) {
+      throttle_seconds <- 0
+    }
+  }
+  api_log_info(paste("Throttle:", throttle_seconds, "seconds per step"))
   
   start_time <- Sys.time()
   
+  # Initialize progress tracking
+  update_progress(progress_token, "request_started", "completed", 
+                 list(request_id = request_id, endpoint = "/api/full-tree-dated"))
+  
   # Input validation logging
   api_log_info("Validating input parameters...")
+  update_progress(progress_token, "validating_input", "in_progress")
   if (is.null(common_names) || is.null(scientific_names)) {
     api_log_warn(paste("Missing required parameters - common_names:", !is.null(common_names), ", scientific_names:", !is.null(scientific_names)))
+    update_progress(progress_token, "validating_input", "error", 
+                   list(error = "Missing required parameters"))
     api_log_info(paste("=== END POST /api/full-tree-dated [Request ID:", request_id, "] - VALIDATION_ERROR - Duration:", round(as.numeric(difftime(Sys.time(), start_time, units = 'secs')), 3), "s ==="))
     return(list(
       success = FALSE,
@@ -640,6 +677,8 @@ function(req, common_names = NULL, scientific_names = NULL) {
   
   if (length(common_list) != length(scientific_list)) {
     api_log_warn(paste("Mismatched array lengths - common:", length(common_list), ", scientific:", length(scientific_list)))
+    update_progress(progress_token, "validating_input", "error", 
+                   list(error = "Mismatched array lengths"))
     api_log_info(paste("=== END POST /api/full-tree-dated [Request ID:", request_id, "] - VALIDATION_ERROR - Duration:", round(as.numeric(difftime(Sys.time(), start_time, units = 'secs')), 3), "s ==="))
     return(list(
       success = FALSE,
@@ -649,6 +688,8 @@ function(req, common_names = NULL, scientific_names = NULL) {
   
   if (length(common_list) < 2) {
     api_log_warn(paste("Insufficient species count:", length(common_list), "(minimum 2 required)"))
+    update_progress(progress_token, "validating_input", "error", 
+                   list(error = "Insufficient species count"))
     api_log_info(paste("=== END POST /api/full-tree-dated [Request ID:", request_id, "] - VALIDATION_ERROR - Duration:", round(as.numeric(difftime(Sys.time(), start_time, units = 'secs')), 3), "s ==="))
     return(list(
       success = FALSE,
@@ -656,11 +697,17 @@ function(req, common_names = NULL, scientific_names = NULL) {
     ))
   }
   
+  update_progress(progress_token, "validating_input", "completed", 
+                 list(species_count = length(common_list)))
+  
   api_log_info("Input validation passed - proceeding with hybrid tree generation...")
   api_log_info(paste("Calling generate_hybrid_tree_html with", length(common_list), "species..."))
   
+  update_progress(progress_token, "generating_hybrid_tree", "in_progress", 
+                 list(common_names = common_list, scientific_names = scientific_list))
+  
   tree_gen_start <- Sys.time()
-  result <- generate_hybrid_tree_html(common_list, scientific_list, request_id = request_id)
+  result <- generate_hybrid_tree_html(common_list, scientific_list, request_id = request_id, progress_token = progress_token, throttle_secs = throttle_seconds)
   tree_gen_duration <- as.numeric(difftime(Sys.time(), tree_gen_start, units = "secs"))
   
   total_duration <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
@@ -668,13 +715,23 @@ function(req, common_names = NULL, scientific_names = NULL) {
   if (result$success) {
     api_log_info(paste("Hybrid tree generation SUCCESSFUL - Tree generation:", round(tree_gen_duration, 3), "s"))
     api_log_info("Response includes: HTML tree, info panels, age data")
+    update_progress(progress_token, "generating_hybrid_tree", "completed", 
+                   list(duration_seconds = round(tree_gen_duration, 3), 
+                        total_duration_seconds = round(total_duration, 3)))
+    update_progress(progress_token, "request_completed", "completed", 
+                   list(success = TRUE, total_duration_seconds = round(total_duration, 3)))
     api_log_info(paste("=== END POST /api/full-tree-dated [Request ID:", request_id, "] - SUCCESS - Total Duration:", round(total_duration, 3), "s ==="))
   } else {
     api_log_error(paste("Hybrid tree generation FAILED - Error:", result$error))
+    update_progress(progress_token, "generating_hybrid_tree", "error", 
+                   list(error = result$error, duration_seconds = round(tree_gen_duration, 3)))
+    update_progress(progress_token, "request_completed", "completed", 
+                   list(success = FALSE, error = result$error, total_duration_seconds = round(total_duration, 3)))
     api_log_info(paste("=== END POST /api/full-tree-dated [Request ID:", request_id, "] - ERROR - Total Duration:", round(total_duration, 3), "s ==="))
   }
   
   return(result)
+  }) # End of future_promise block
 }
 
 #* Get truncated Wikipedia introduction for taxonomic group
@@ -892,6 +949,126 @@ function(count = 3) {
     return(list(
       success = FALSE,
       error = paste("Error generating debug data:", conditionMessage(e))
+    ))
+  })
+}
+
+#* Generate progress token and create progress file
+#* @get /api/get_progress_token
+#* @serializer unboxedJSON
+function() {
+  tryCatch({
+    # Clean up old progress files (older than 1 hour)
+    cleanup_start <- Sys.time()
+    progress_dir <- "progress"
+    
+    if (dir.exists(progress_dir)) {
+      # Get all .json files in progress directory
+      json_files <- list.files(progress_dir, pattern = "\\.json$", full.names = TRUE)
+      
+      if (length(json_files) > 0) {
+        current_time <- Sys.time()
+        one_hour_ago <- current_time - 3600  # 3600 seconds = 1 hour
+        
+        cleaned_count <- 0
+        for (file_path in json_files) {
+          file_info <- file.info(file_path)
+          if (!is.na(file_info$mtime) && file_info$mtime < one_hour_ago) {
+            if (file.remove(file_path)) {
+              cleaned_count <- cleaned_count + 1
+            }
+          }
+        }
+        
+        if (cleaned_count > 0) {
+          api_log_info(paste("Cleaned up", cleaned_count, "old progress files"))
+        }
+      }
+    }
+    
+    cleanup_duration <- as.numeric(difftime(Sys.time(), cleanup_start, units = "secs"))
+    
+    # Generate random string token
+    random_string <- paste0(
+      paste(sample(c(letters, LETTERS, 0:9), 16, replace = TRUE), collapse = ""),
+      "_",
+      format(Sys.time(), "%Y%m%d_%H%M%S")
+    )
+    
+    # Create progress file path
+    progress_file <- paste0("progress/", random_string, ".json")
+    
+    # Create initial progress data
+    progress_data <- list(
+      token = random_string,
+      created_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+      status = "initialized"
+    )
+    
+    # Write to file
+    writeLines(jsonlite::toJSON(progress_data, pretty = TRUE, auto_unbox = TRUE, na = "null"), progress_file)
+    
+    response <- list(
+      success = TRUE,
+      token = random_string
+    )
+    
+    # Include cleanup info if any files were cleaned
+    if (exists("cleaned_count") && cleaned_count > 0) {
+      response$cleanup_info <- list(
+        files_cleaned = cleaned_count,
+        cleanup_duration_seconds = round(cleanup_duration, 3)
+      )
+    }
+    
+    return(response)
+    
+  }, error = function(e) {
+    return(list(
+      success = FALSE,
+      error = paste("Error creating progress token:", conditionMessage(e))
+    ))
+  })
+}
+
+#* Get progress information for a given progress token
+#* @param progress_token The progress token to retrieve information for
+#* @get /api/progress
+#* @serializer unboxedJSON
+function(progress_token = NULL) {
+  if (is.null(progress_token) || progress_token == "") {
+    return(list(
+      success = FALSE,
+      error = "Missing required parameter 'progress_token'",
+      note = "Provide a valid progress token obtained from /api/get_progress_token"
+    ))
+  }
+  
+  tryCatch({
+    # Create progress file path
+    progress_file <- paste0("progress/", progress_token, ".json")
+    
+    # Check if file exists
+    if (!file.exists(progress_file)) {
+      return(list(
+        success = FALSE,
+        error = "Progress token not found",
+        progress_token = progress_token,
+        note = "The progress token may have expired or is invalid"
+      ))
+    }
+    
+    # Read and return raw progress data
+    progress_data <- jsonlite::fromJSON(progress_file, simplifyVector = TRUE)
+    
+    # Return the raw progress file content
+    return(progress_data)
+    
+  }, error = function(e) {
+    return(list(
+      success = FALSE,
+      error = paste("Error reading progress data:", conditionMessage(e)),
+      progress_token = progress_token
     ))
   })
 }
