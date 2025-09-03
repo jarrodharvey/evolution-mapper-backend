@@ -652,8 +652,9 @@ function(req, common_names = NULL, scientific_names = NULL, allow_partial_respon
 #* @param common_names A JSON array of species common names
 #* @param scientific_names A JSON array of species scientific names (must match common_names length)
 #* @param progress_token Optional progress token for tracking tree generation steps
+#* @param expansion_speed Optional expansion speed in milliseconds (default 750)
 #* @post /api/full-tree-dated
-function(req, common_names = NULL, scientific_names = NULL, progress_token = NULL, throttle_secs = NULL) {
+function(req, common_names = NULL, scientific_names = NULL, progress_token = NULL, throttle_secs = NULL, expansion_speed = NULL) {
   # Use future_promise for asynchronous processing to allow concurrent requests
   promises::future_promise({
   request_id <- paste0("req_", format(Sys.time(), "%Y%m%d_%H%M%S_"), sample(1000:9999, 1))
@@ -729,13 +730,23 @@ function(req, common_names = NULL, scientific_names = NULL, progress_token = NUL
                  list(species_count = length(common_list)))
   
   api_log_info("Input validation passed - proceeding with hybrid tree generation...")
+  # Parse and validate expansion_speed parameter
+  expansion_ms <- 750  # Default value
+  if (!is.null(expansion_speed) && expansion_speed != "") {
+    expansion_ms <- as.numeric(expansion_speed)
+    if (is.na(expansion_ms) || expansion_ms < 0) {
+      expansion_ms <- 750  # Reset to default if invalid
+    }
+  }
+  api_log_info(paste("Expansion speed:", expansion_ms, "milliseconds"))
+  
   api_log_info(paste("Calling generate_hybrid_tree_html with", length(common_list), "species..."))
   
   update_progress(progress_token, "generating_hybrid_tree", "in_progress", 
                  list(common_names = common_list, scientific_names = scientific_list))
   
   tree_gen_start <- Sys.time()
-  result <- generate_hybrid_tree_html(common_list, scientific_list, request_id = request_id, progress_token = progress_token, throttle_secs = throttle_seconds)
+  result <- generate_hybrid_tree_html(common_list, scientific_list, request_id = request_id, progress_token = progress_token, throttle_secs = throttle_seconds, expansion_speed = expansion_ms)
   tree_gen_duration <- as.numeric(difftime(Sys.time(), tree_gen_start, units = "secs"))
   
   total_duration <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))

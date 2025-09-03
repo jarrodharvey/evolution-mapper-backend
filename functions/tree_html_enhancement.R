@@ -310,7 +310,10 @@ enhance_tree_html_with_info_panels <- function(tree_html, network_data) {
   }
   </script>')
   
-  # Add only our new info panel script (remove old conflicting system)
+  # NOTE: Duration modification is now handled via htmlwidgets::onRender() in hybrid_tree_generation.R
+  # This is more reliable than regex replacement as it works at the JavaScript runtime level
+
+  # Add info panel script
   tree_html <- gsub("</body>", paste0(info_panel_script, "</body>"), tree_html)
   
   return(tree_html)
@@ -320,8 +323,9 @@ enhance_tree_html_with_info_panels <- function(tree_html, network_data) {
 #' @param tree_html HTML string from collapsibleTreeNetwork
 #' @param network_data Network data with node information
 #' @param cached_info_panels Pre-generated info panel data from create_info_panel_data_parallel()
+#' @param expansion_speed Duration in milliseconds for tree expansion animations (default: 750)
 #' @return Enhanced HTML with CSS and JavaScript for info panel system
-enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, cached_info_panels) {
+enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, cached_info_panels, expansion_speed = 750) {
   
   # Add layout CSS and info panel CSS
   layout_css <- "<style>body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; } html { margin: 0 !important; padding: 0 !important; } #htmlwidget_container { margin: 0 !important; padding: 0 !important; }</style>"
@@ -536,7 +540,7 @@ enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, c
 #' @param request_id Optional request ID for logging correlation
 #' @param progress_token Optional progress token for tracking external API calls
 #' @return Enhanced HTML with info panel system
-create_enhanced_tree_html <- function(tree_data, network_data, tree_widget, request_id = NULL, progress_token = NULL) {
+create_enhanced_tree_html <- function(tree_data, network_data, tree_widget, request_id = NULL, progress_token = NULL, expansion_speed = 750) {
   
   # Convert to HTML using temporary file approach
   temp_file <- tempfile(fileext = ".html")
@@ -548,7 +552,7 @@ create_enhanced_tree_html <- function(tree_data, network_data, tree_widget, requ
   cached_info_panels <- create_info_panel_data_sequential(network_data, request_id = request_id, progress_token = progress_token)
   
   # Enhance HTML with info panel system using cached data
-  enhanced_html <- enhance_tree_html_with_info_panels_cached(tree_html, network_data, cached_info_panels)
+  enhanced_html <- enhance_tree_html_with_info_panels_cached(tree_html, network_data, cached_info_panels, expansion_speed)
   
   return(enhanced_html)
 }

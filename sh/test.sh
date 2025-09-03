@@ -8,13 +8,14 @@ pkill -f "tail -f logs/api.log" 2>/dev/null || true
 
 # Generate random hybrid phylogenetic tree HTML using /api/full-tree-dated
 # Combines ROTL topology with DateLife ages where available
-# Usage: ./sh/generate_random_hybrid.sh [count] [output_file] [--simple] [--progress]
+# Usage: ./sh/generate_random_hybrid.sh [count] [output_file] [--simple] [--progress] [--expansion-speed=N]
 #
 # Arguments:
 #   count: Number of species (3-20, default random between 4-12)
 #   output_file: Output HTML file (default sh/random_hybrid_tree.html)
 #   --simple: Use predefined simple species set (chicken, human, chimpanzee)
 #   --progress: Use progress tracking instead of log streaming
+#   --expansion-speed=N: Set tree expansion speed in milliseconds (default 750)
 
 # Get API key from .Renviron file
 if [[ -f ".Renviron" ]]; then
@@ -35,6 +36,7 @@ USE_SIMPLE=false
 USE_PROGRESS=false
 COUNT=""
 OUTPUT_FILE=""
+EXPANSION_SPEED=""
 
 # Parse arguments
 for arg in "$@"; do
@@ -44,6 +46,9 @@ for arg in "$@"; do
             ;;
         --progress)
             USE_PROGRESS=true
+            ;;
+        --expansion-speed=*)
+            EXPANSION_SPEED="${arg#*=}"
             ;;
         *)
             if [[ -z "$COUNT" && "$arg" =~ ^[0-9]+$ ]]; then
@@ -73,6 +78,14 @@ fi
 
 OUTPUT_FILE=${OUTPUT_FILE:-"sh/random_hybrid_tree.html"}
 
+# Validate expansion speed parameter
+if [[ -n "$EXPANSION_SPEED" ]]; then
+    if ! [[ "$EXPANSION_SPEED" =~ ^[0-9]+$ ]] || [[ $EXPANSION_SPEED -lt 0 ]]; then
+        echo "Error: Expansion speed must be a non-negative integer (milliseconds)" >&2
+        exit 1
+    fi
+fi
+
 echo "=== Hybrid Tree Generation Test ==="
 if [[ "$USE_SIMPLE" == true ]]; then
     echo "Generating simple hybrid tree with predefined species set..."
@@ -80,6 +93,9 @@ else
     echo "Generating random hybrid tree with $COUNT species..."
 fi
 echo "Output will be saved to: $OUTPUT_FILE"
+if [[ -n "$EXPANSION_SPEED" ]]; then
+    echo "Tree expansion speed: ${EXPANSION_SPEED}ms"
+fi
 
 # Check if server is running
 echo ""
@@ -222,6 +238,9 @@ if [[ -n "$PROGRESS_TOKEN" ]]; then
     API_DATA="${API_DATA}&progress_token=$PROGRESS_TOKEN"
     # Add throttle for better progress monitoring visibility
     API_DATA="${API_DATA}&throttle_secs=3"
+fi
+if [[ -n "$EXPANSION_SPEED" ]]; then
+    API_DATA="${API_DATA}&expansion_speed=$EXPANSION_SPEED"
 fi
 
 # Start curl in background and write to temp file

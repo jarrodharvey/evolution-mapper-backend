@@ -197,7 +197,7 @@ calculate_dynamic_link_length_hybrid <- function(network_data, base_length = 100
 #' @param scientific_names Vector of scientific names provided by user
 #' @param request_id Optional request ID for logging correlation
 #' @return List with success status and HTML or error message
-generate_hybrid_tree_html <- function(common_names, scientific_names, request_id = NULL, progress_token = NULL, throttle_secs = 0) {
+generate_hybrid_tree_html <- function(common_names, scientific_names, request_id = NULL, progress_token = NULL, throttle_secs = 0, expansion_speed = 750) {
   if (is.null(request_id)) {
     request_id <- paste0("hybrid_", format(Sys.time(), "%H%M%S"))
   }
@@ -987,7 +987,7 @@ create_hybrid_tree_visualization <- function(network_data, request_id = NULL, pr
     get_node_color(node_type, has_age)
   })
   
-  # Create collapsibleTree with color mapping
+  # Create collapsibleTree with color mapping and expansion settings
   tree_widget <- collapsibleTreeNetwork(
     tree_data,
     attribute = "NodeType",
@@ -997,8 +997,58 @@ create_hybrid_tree_visualization <- function(network_data, request_id = NULL, pr
     nodeSize = "leafCount",
     width = 1000,
     height = 800,
-    zoomable = TRUE
+    zoomable = TRUE,
+    collapsed = TRUE  # Start collapsed, will expand all with custom speed
   )
+  
+  # Override transition durations and expand all nodes using htmlwidgets::onRender
+  if (expansion_speed != 750) {
+    tree_widget <- tree_widget %>%
+      htmlwidgets::onRender(paste0("
+        function(el, x) {
+          // Override D3 transition duration for all transitions
+          var originalTransition = d3.selection.prototype.transition;
+          d3.selection.prototype.transition = function() {
+            var transition = originalTransition.apply(this, arguments);
+            var originalDuration = transition.duration;
+            transition.duration = function(d) {
+              if (arguments.length === 0) return originalDuration.apply(this, arguments);
+              return originalDuration.call(this, ", expansion_speed, ");
+            };
+            return transition;
+          };
+          
+          // Recursive function to click all nodes with hidden children (_children)
+          function expandAll() {
+            var nodes = d3.select(el).selectAll('g.node').filter(function(d) {
+              return d._children;
+            });
+            
+            if (nodes.size() > 0) {
+              nodes.each(function(d, i, nodes) {
+                var clickEvent = new MouseEvent('click', {
+                  bubbles: true,
+                  cancelable: true,
+                  view: window
+                });
+                this.dispatchEvent(clickEvent);
+              });
+              
+              // Wait for transitions to complete, then check for more collapsed nodes
+              setTimeout(expandAll, ", expansion_speed, " + 100);
+            } else {
+              // All nodes expanded! Restore default 750ms speed for future user interactions
+              d3.selection.prototype.transition = originalTransition;
+            }
+          }
+          
+          // Wait for tree to render, then expand all nodes
+          setTimeout(function() {
+            expandAll();
+          }, 500);
+        }
+      "))
+  }
   
   # Transform network data to info panel format
   info_panel_network_data <- transform_hybrid_to_info_panel_format(network_data)
@@ -1007,7 +1057,7 @@ create_hybrid_tree_visualization <- function(network_data, request_id = NULL, pr
   tree_data <- add_info_panel_data(tree_data, info_panel_network_data, request_id, progress_token)
   
   # Use enhanced tree HTML generation with info panels and progress tracking
-  tree_html <- create_enhanced_tree_html(tree_data, info_panel_network_data, tree_widget, request_id, progress_token)
+  tree_html <- create_enhanced_tree_html(tree_data, info_panel_network_data, tree_widget, request_id, progress_token, expansion_speed)
   
   
   return(tree_html)
