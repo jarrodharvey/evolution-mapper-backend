@@ -78,7 +78,12 @@ clean_scientific_names <- function(scientific_names) {
 # Simple in-memory rate limiting - tracks requests per IP
 rate_limit_storage <- new.env()
 rate_limit_window <- 60  # seconds
-rate_limit_max <- 60     # requests per window
+rate_limit_max <- 300    # requests per window
+
+# Separate rate limiting for tree endpoints (more restrictive)
+tree_rate_limit_storage <- new.env()
+tree_rate_limit_window <- 60  # seconds
+tree_rate_limit_max <- 10     # requests per window for tree endpoints
 
 # API Key configuration from .Renviron file
 # Load API keys from environment variable (set in .Renviron)
@@ -136,35 +141,57 @@ function(req, res) {
     return()
   }
   
+  # Check if this is a tree endpoint (more restrictive limits)
+  is_tree_endpoint <- grepl("/(tree|dated-tree|full-tree-dated|random-tree|debug-tree)$", req$PATH_INFO)
+  
   # Use IP address as the identifier for rate limiting
   client_ip <- req$REMOTE_ADDR %||% "unknown"
   current_time <- as.numeric(Sys.time())
   
-  # Get or initialize request history for this IP
-  if (!exists(client_ip, envir = rate_limit_storage)) {
-    rate_limit_storage[[client_ip]] <- list()
+  if (is_tree_endpoint) {
+    # Use stricter rate limiting for tree endpoints
+    if (!exists(client_ip, envir = tree_rate_limit_storage)) {
+      tree_rate_limit_storage[[client_ip]] <- list()
+    }
+    
+    ip_requests <- tree_rate_limit_storage[[client_ip]]
+    cutoff_time <- current_time - tree_rate_limit_window
+    ip_requests <- ip_requests[ip_requests > cutoff_time]
+    
+    if (length(ip_requests) >= tree_rate_limit_max) {
+      res$status <- 429  # Too Many Requests
+      return(list(
+        success = FALSE,
+        error = "Rate limit exceeded for tree endpoints. Maximum 10 requests per minute allowed.",
+        retry_after = 60
+      ))
+    }
+    
+    ip_requests <- c(ip_requests, current_time)
+    tree_rate_limit_storage[[client_ip]] <- ip_requests
+    
+  } else {
+    # Use general rate limiting for other endpoints
+    if (!exists(client_ip, envir = rate_limit_storage)) {
+      rate_limit_storage[[client_ip]] <- list()
+    }
+    
+    ip_requests <- rate_limit_storage[[client_ip]]
+    cutoff_time <- current_time - rate_limit_window
+    ip_requests <- ip_requests[ip_requests > cutoff_time]
+    
+    if (length(ip_requests) >= rate_limit_max) {
+      res$status <- 429  # Too Many Requests
+      return(list(
+        success = FALSE,
+        error = "Rate limit exceeded. Maximum 300 requests per minute allowed.",
+        retry_after = 60
+      ))
+    }
+    
+    ip_requests <- c(ip_requests, current_time)
+    rate_limit_storage[[client_ip]] <- ip_requests
   }
-  
-  # Get request timestamps for this IP
-  ip_requests <- rate_limit_storage[[client_ip]]
-  
-  # Remove requests outside the time window
-  cutoff_time <- current_time - rate_limit_window
-  ip_requests <- ip_requests[ip_requests > cutoff_time]
-  
-  # Check if rate limit exceeded
-  if (length(ip_requests) >= rate_limit_max) {
-    res$status <- 429  # Too Many Requests
-    return(list(
-      success = FALSE,
-      error = "Rate limit exceeded. Maximum 60 requests per minute allowed.",
-      retry_after = 60
-    ))
-  }
-  
-  # Add current request timestamp
-  ip_requests <- c(ip_requests, current_time)
-  rate_limit_storage[[client_ip]] <- ip_requests
   
   forward()
 }
