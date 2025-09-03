@@ -742,7 +742,7 @@ function(req, common_names = NULL, scientific_names = NULL, progress_token = NUL
   
   api_log_info(paste("Calling generate_hybrid_tree_html with", length(common_list), "species..."))
   
-  update_progress(progress_token, "generating_hybrid_tree", "in_progress", 
+  update_progress(progress_token, "generating_evolution_map", "in_progress", 
                  list(common_names = common_list, scientific_names = scientific_list))
   
   tree_gen_start <- Sys.time()
@@ -754,7 +754,7 @@ function(req, common_names = NULL, scientific_names = NULL, progress_token = NUL
   if (result$success) {
     api_log_info(paste("Hybrid tree generation SUCCESSFUL - Tree generation:", round(tree_gen_duration, 3), "s"))
     api_log_info("Response includes: HTML tree, info panels, age data")
-    update_progress(progress_token, "generating_hybrid_tree", "completed", 
+    update_progress(progress_token, "generating_evolution_map", "completed", 
                    list(duration_seconds = round(tree_gen_duration, 3), 
                         total_duration_seconds = round(total_duration, 3)))
     update_progress(progress_token, "request_completed", "completed", 
@@ -762,7 +762,7 @@ function(req, common_names = NULL, scientific_names = NULL, progress_token = NUL
     api_log_info(paste("=== END POST /api/full-tree-dated [Request ID:", request_id, "] - SUCCESS - Total Duration:", round(total_duration, 3), "s ==="))
   } else {
     api_log_error(paste("Hybrid tree generation FAILED - Error:", result$error))
-    update_progress(progress_token, "generating_hybrid_tree", "error", 
+    update_progress(progress_token, "generating_evolution_map", "error", 
                    list(error = result$error, duration_seconds = round(tree_gen_duration, 3)))
     update_progress(progress_token, "request_completed", "completed", 
                    list(success = FALSE, error = result$error, total_duration_seconds = round(total_duration, 3)))
