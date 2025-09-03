@@ -21,7 +21,18 @@ cached_get_wikipedia_intro <- function(taxonomic_group, truncate_length = 300) {
   cache_stats_before <- wikipedia_cache$size()
   
   api_log_info(paste("Wikipedia Cache lookup for", taxonomic_group))
-  result <- memoised_get_wikipedia_intro(taxonomic_group, truncate_length)
+  
+  # Ensure required functions are available in this context
+  tryCatch({
+    result <- memoised_get_wikipedia_intro(taxonomic_group, truncate_length)
+  }, error = function(e) {
+    # If memoised function fails due to missing dependencies, call original function directly
+    api_log_warn(paste("Memoised Wikipedia function failed, calling original:", e$message))
+    # Re-source the wikipedia functions to ensure they're available
+    source("functions/wikipedia_api.R", local = TRUE)
+    result <- get_wikipedia_intro(taxonomic_group, truncate_length)
+    return(result)
+  })
   
   cache_stats_after <- wikipedia_cache$size()
   
@@ -74,7 +85,17 @@ cached_get_wikipedia_extract <- function(page_id, truncate_length = 300) {
 cached_get_silhouette_data <- function(taxonomic_name) {
   cache_stats_before <- phylopic_cache$size()
   
-  result <- memoised_get_silhouette_data(taxonomic_name)
+  # Ensure required functions are available in this context
+  tryCatch({
+    result <- memoised_get_silhouette_data(taxonomic_name)
+  }, error = function(e) {
+    # If memoised function fails due to missing dependencies, call original function directly
+    api_log_warn(paste("Memoised PhyloPic function failed, calling original:", e$message))
+    # Re-source the phylopic functions to ensure they're available
+    source("functions/phylopic_silhouettes.R", local = TRUE)
+    result <- get_silhouette_data(taxonomic_name)
+    return(result)
+  })
   
   cache_stats_after <- phylopic_cache$size()
   

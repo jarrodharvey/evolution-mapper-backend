@@ -1051,10 +1051,10 @@ extract_taxonomic_name <- function(node_info) {
     return(NULL)
   }
   
-  # Extract taxonomic name from hybrid nodes like "Spermatophyta (352.2 Mya)" or "Boreoeutheria (99.3 Mya)"
-  if (grepl("\\s*\\([0-9]+\\.?[0-9]*\\s+Mya\\)", raw_name)) {
-    # Extract just the taxonomic part before the age in parentheses
-    taxonomic_name <- sub("\\s*\\([0-9]+\\.?[0-9]*\\s+Mya\\).*$", "", raw_name)
+  # Extract taxonomic name from hybrid nodes like "Spermatophyta (352.2 Mya)" or "Boreoeutheria (99.3 Mya)" or "Clupeocephala (~532.4 Mya)"
+  if (grepl("\\s*\\(~?[0-9]+\\.?[0-9]*\\s+Mya\\)", raw_name)) {
+    # Extract just the taxonomic part before the age in parentheses (handles optional tilde)
+    taxonomic_name <- sub("\\s*\\(~?[0-9]+\\.?[0-9]*\\s+Mya\\).*$", "", raw_name)
     taxonomic_name <- trimws(taxonomic_name)
   } else if (grepl("\\.[0-9]+\\.[0-9]+\\.*Mya\\.", raw_name)) {
     # Handle the old dot format for backward compatibility
@@ -1110,10 +1110,10 @@ add_wikipedia_data <- function(node_info) {
     return(node_info)  # Return unchanged if no name found
   }
   
-  # Extract taxonomic name from hybrid nodes like "Spermatophyta (352.2 Mya)" or "Boreoeutheria (99.3 Mya)"
-  if (grepl("\\s*\\([0-9]+\\.?[0-9]*\\s+Mya\\)", raw_name)) {
-    # Extract just the taxonomic part before the age in parentheses
-    taxonomic_name <- sub("\\s*\\([0-9]+\\.?[0-9]*\\s+Mya\\).*$", "", raw_name)
+  # Extract taxonomic name from hybrid nodes like "Spermatophyta (352.2 Mya)" or "Boreoeutheria (99.3 Mya)" or "Clupeocephala (~532.4 Mya)"
+  if (grepl("\\s*\\(~?[0-9]+\\.?[0-9]*\\s+Mya\\)", raw_name)) {
+    # Extract just the taxonomic part before the age in parentheses (handles optional tilde)
+    taxonomic_name <- sub("\\s*\\(~?[0-9]+\\.?[0-9]*\\s+Mya\\).*$", "", raw_name)
     taxonomic_name <- trimws(taxonomic_name)
   } else if (grepl("\\.[0-9]+\\.[0-9]+\\.*Mya\\.", raw_name)) {
     # Handle the old dot format for backward compatibility
