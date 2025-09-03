@@ -468,46 +468,43 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
       }
       api_log_info(paste("[", request_id, "] Extracted", length(datelife_species), "unique species from DateLife chronograms"))
       
-      # Create consensus matrix and phylo tree to get ancestor ages
+      # Use modern chronos approach instead of problematic summary_matrix_to_phylo
       tryCatch({
-        api_log_info(paste("[", request_id, "] Creating consensus matrix from chronograms...", sep=""))
-        consensus_start <- Sys.time()
-        consensus_matrix <- datelife_result_median_matrix(datelife_result)
-        consensus_duration <- as.numeric(difftime(Sys.time(), consensus_start, units = "secs"))
-        api_log_info(paste("[", request_id, "] Consensus matrix created -", nrow(consensus_matrix), "x", ncol(consensus_matrix), "matrix - Duration:", round(consensus_duration, 3), "s"))
+        api_log_info(paste("[", request_id, "] Using modern chronos approach for DateLife age calibration...", sep=""))
         
-        if (nrow(consensus_matrix) >= 2) {
-          api_log_info(paste("[", request_id, "] Converting consensus matrix to phylo tree...", sep=""))
-          phylo_start <- Sys.time()
-          # Convert to phylo tree using proper DateLife function
-          datelife_phylo <- summary_matrix_to_phylo(consensus_matrix)
-          phylo_duration <- as.numeric(difftime(Sys.time(), phylo_start, units = "secs"))
-          api_log_info(paste("[", request_id, "] DateLife phylo tree created - Duration:", round(phylo_duration, 3), "s"))
+        # Source the modern age mapping functions
+        source("functions/modern_age_mapping.R")
+        
+        # Create species data frame for chronos
+        species_data_for_chronos <- data.frame(
+          common = common_names,
+          scientific = scientific_names,
+          stringsAsFactors = FALSE
+        )
+        
+        chronos_start <- Sys.time()
+        chronos_result <- generate_dated_tree_chronos(rotl_tree, datelife_result, species_data_for_chronos, request_id)
+        chronos_duration <- as.numeric(difftime(Sys.time(), chronos_start, units = "secs"))
+        
+        if (chronos_result$success) {
+          api_log_info(paste("[", request_id, "] Modern chronos approach successful - Duration:", round(chronos_duration, 3), "s"))
+          api_log_info(paste("[", request_id, "] Calibrations used:", nrow(chronos_result$calibrations_used)))
+          api_log_info(paste("[", request_id, "] Pairwise ages found:", chronos_result$pairwise_ages_found))
           
-          # Get node depths (ages) from DateLife tree
-          api_log_info(paste("[", request_id, "] Extracting ancestor ages from DateLife tree...", sep=""))
-          node_depths <- node.depth.edgelength(datelife_phylo)
-          root_age <- max(node_depths)
-          node_ages <- root_age - node_depths
-          api_log_info(paste("[", request_id, "] DateLife tree root age:", round(root_age, 1), "Mya"))
+          # Use the ages from chronos result
+          ancestor_ages <- chronos_result$node_ages
           
-          # Extract ancestor ages for internal nodes
-          n_tips_datelife <- length(datelife_phylo$tip.label)
-          for (i in 1:datelife_phylo$Nnode) {
-            node_idx <- n_tips_datelife + i
-            ancestor_age <- node_ages[node_idx]
-            
-            # Get descendant species for this internal node
-            subtree <- extract.clade(datelife_phylo, node_idx)
-            descendants <- subtree$tip.label
-            # Create a key based on sorted descendant species
-            desc_key <- paste(sort(descendants), collapse = "|")
-            ancestor_ages[[desc_key]] <- ancestor_age
-          }
+          # Get root age from the dated tree
+          branching_times_tree <- branching.times(chronos_result$dated_tree)
+          root_age <- max(branching_times_tree)
+          api_log_info(paste("[", request_id, "] Root age from chronos:", round(root_age, 1), "Mya"))
           
-          api_log_info(paste("[", request_id, "] Extracted ancestor ages for", length(ancestor_ages), "internal nodes from DateLife"))
+          api_log_info(paste("[", request_id, "] Extracted ancestor ages for", length(ancestor_ages), "internal nodes from modern chronos"))
+          
         } else {
-          api_log_warn(paste("[", request_id, "] Consensus matrix too small (", nrow(consensus_matrix), "species) - skipping phylo tree creation", sep=""))
+          api_log_warn(paste("[", request_id, "] Modern chronos approach failed:", chronos_result$error))
+          api_log_info(paste("[", request_id, "] Proceeding with ROTL tree only (age data will be unavailable)"))
+          ancestor_ages <- list()
         }
       }, error = function(e) {
         api_log_error(paste("[", request_id, "] Could not create DateLife phylo tree:", conditionMessage(e)))
