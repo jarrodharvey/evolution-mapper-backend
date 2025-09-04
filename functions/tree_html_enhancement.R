@@ -177,6 +177,11 @@ enhance_tree_html_with_info_panels <- function(tree_html, network_data) {
         
         console.log("Processing node:", nodeName, "Full nodeData:", nodeData);
         
+        // Add ID to Common ancestor node
+        if (nodeName === "Common ancestor") {
+          node.attr("id", "common_ancestor_node");
+        }
+        
         // Check if we have info panel data for this node
         var infoPanelHtml = infoPanelData[nodeName];
         if (infoPanelHtml && infoPanelHtml.trim() !== "") {
@@ -393,6 +398,11 @@ enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, c
         var nodeName = nodeData && nodeData.data ? nodeData.data.name : null;
         
         console.log("Processing node:", nodeName, "Full nodeData:", nodeData);
+        
+        // Add ID to Common ancestor node
+        if (nodeName === "Common ancestor") {
+          node.attr("id", "common_ancestor_node");
+        }
         
         // Check if we have info panel data for this node
         var infoPanelHtml = infoPanelData[nodeName];
