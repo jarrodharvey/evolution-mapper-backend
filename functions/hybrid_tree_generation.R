@@ -737,7 +737,7 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
           # Check if our descendants are a subset of this DateLife age group
           if (all(datelife_descendants %in% age_descendants)) {
             ancestor_age_mya <- round(ancestor_ages[[age_key]], 1)
-            return(list(info = paste0("~", ancestor_age_mya, " Mya"), has_age = TRUE))
+            return(list(info = paste0(ancestor_age_mya, " Mya"), has_age = TRUE))
           }
         }
         
