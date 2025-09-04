@@ -107,7 +107,22 @@ source("provision_server.R")
 install.packages("lintr")
 library(lintr)
 lint("plumber.R")
-lint("functions/tree_generation.R")
+lint("functions/rotl_tree_generation.R")
+lint("functions/hybrid_tree_generation.R")
+```
+
+### Server Restart Required
+When making changes to any R files, restart the server for changes to take effect:
+```r
+# Stop current server (Ctrl+C), then restart
+library(plumber)
+pr("plumber.R") %>% pr_run(port = 8000)
+```
+
+### Kill Process on Port 8000
+```bash
+# If port 8000 is occupied
+lsof -ti:8000 | xargs kill -9
 ```
 
 ## Architecture Overview
@@ -116,20 +131,27 @@ lint("functions/tree_generation.R")
 - **plumber.R**: Main API server with comprehensive REST endpoints and CORS configuration
 - **functions/rotl_tree_generation.R**: Core phylogenetic tree logic using Open Tree of Life (topology only)
 - **functions/datelife_tree_generation.R**: Dated tree generation using DateLife chronograms with ancestor ages
-- **functions/hybrid_tree_generation.R**: NEW - Hybrid trees combining ROTL topology with DateLife age data
-- **functions/info_panel_system.R**: NEW - Mobile-friendly info panels with Wikipedia/PhyloPic integration
+- **functions/hybrid_tree_generation.R**: Hybrid trees combining ROTL topology with DateLife age data
+- **functions/info_panel_system.R**: Mobile-friendly info panels with Wikipedia/PhyloPic integration
 - **functions/tree_html_enhancement.R**: Advanced tree visualization customization
 - **functions/wikipedia_api.R**: Wikipedia integration for taxonomic information
 - **functions/phylopic_silhouettes.R**: PhyloPic integration for species silhouettes
 - **functions/color_config.R**: Centralized color scheme configuration
+- **functions/logging_config.R**: Centralized logging configuration using logger package
+- **functions/progress_tracking.R**: Progress tracking for long-running operations
+- **functions/parallel_config.R**: Parallel processing configuration
+- **functions/caching_config.R**: Caching configuration for external API calls
 - **data/species.sqlite**: Species database (90,276+ records with OTT IDs, common names, scientific names)
 
 ### API Features Overview
 - **Topology Trees**: Fast generation using common names, works for any species combination
 - **Dated Trees**: Age-calibrated trees using scientific names, limited to species with chronogram data
-- **Hybrid Trees**: NEW - Best of both worlds, ROTL topology with DateLife ages where available
-- **Info Panel System**: NEW - Mobile-friendly clickable info panels replacing tooltips
+- **Hybrid Trees**: Best of both worlds, ROTL topology with DateLife ages where available
+- **Info Panel System**: Mobile-friendly clickable info panels replacing tooltips
 - **Parallel Processing**: Performance-optimized data fetching for Wikipedia and PhyloPic content
+- **Progress Tracking**: Server-sent events for real-time progress updates on long-running operations
+- **Caching System**: Intelligent caching of external API calls (Wikipedia, PhyloPic, DateLife)
+- **Logging Infrastructure**: Centralized logging using logger package with file and console output
 - **Fallback Strategy**: Frontend can attempt dated trees first, fall back to topology trees
 - **Interactive Visualization**: Color-coded CollapsibleTree with age tooltips, geological periods, and species silhouettes
 
@@ -346,7 +368,16 @@ cat("Chronograms found:", length(result))
 ```
 
 ### Testing Infrastructure
-No formal test suite exists. Use curl commands above for manual endpoint testing. For function-level testing:
+Manual testing via curl commands and shell scripts in `tests/` directory. Key test files:
+
+```bash
+# Run API integration tests
+./tests/test_clupeocephala_api.sh
+
+# Shell test runner
+./sh/test.sh
+```
+
 ```r
 # Test topology-only trees
 source("functions/rotl_tree_generation.R")
@@ -358,13 +389,31 @@ source("functions/datelife_tree_generation.R")
 test_species_sci <- c("Homo sapiens", "Canis lupus")
 datelife_result <- get_datelife_result(input = test_species_sci)
 
-# Test hybrid trees (NEW)
+# Test hybrid trees
 source("functions/hybrid_tree_generation.R")
 common_names <- c("Human", "Dog", "Cat")
 scientific_names <- c("Homo sapiens", "Canis lupus", "Felis catus")
 hybrid_result <- generate_hybrid_tree_html(common_names, scientific_names)
 
 # Performance testing
-source("test_parallel_performance.R")  # Benchmarks parallel processing improvements
+source("tests/cache_performance_logging.R")  # Benchmarks caching improvements
+source("tests/parallel_side_effects_investigation.R")  # Parallel processing tests
 ```
-- do not log using cat() use the project's logger() implementation
+
+**Test Organization:**
+- Save all test files to `tests/` directory (never to root)
+- API integration tests use shell scripts with curl
+- Function-level tests use R scripts
+- Performance benchmarks in dedicated test files
+
+### Logging Standards
+- **Never use `cat()`** for logging - use the project's logger implementation
+- Use functions from `functions/logging_config.R`: `api_log_info()`, `api_log_warn()`, `api_log_error()`
+- Logs are written to `logs/api.log` and console
+- Logger uses namespace `evolution.api` for consistent formatting
+
+### API Key Management
+- **Never hardcode API keys** - always use environment variables
+- API keys stored in `.Renviron` (excluded from git)
+- Use `.Renviron.example` as template for setup
+- Example keys in documentation (like `your-dev-key-123`) are invalid and will not work
