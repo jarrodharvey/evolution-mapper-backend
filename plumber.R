@@ -881,7 +881,7 @@ function(count = 3) {
     hierarchy_cols <- c(hierarchy_cols, "Species")
     
     # Collect all unique nodes
-    all_unique_nodes <- c("Common ancestor - click me!")
+    all_unique_nodes <- c("Common ancestor")
     for (col in hierarchy_cols[hierarchy_cols != "Species"]) {
       unique_vals <- unique(hierarchy_data[[col]][!is.na(hierarchy_data[[col]])])
       all_unique_nodes <- c(all_unique_nodes, unique_vals)
@@ -890,7 +890,7 @@ function(count = 3) {
     
     # Create color mapping
     node_colors <- sapply(all_unique_nodes, function(node) {
-      if (node == "Common ancestor - click me!") {
+      if (node == "Common ancestor") {
         return("#E74C3C")  # Red for root
       } else if (node == "Ancestor") {
         return("#3498DB")  # Blue for ancestor nodes
@@ -910,7 +910,7 @@ function(count = 3) {
       stringsAsFactors = FALSE
     )
     
-    root_name <- "Common ancestor - click me!"
+    root_name <- "Common ancestor"
     
     # Only process if hierarchy_data exists and has rows
     if (!is.null(hierarchy_data) && nrow(hierarchy_data) > 0) {

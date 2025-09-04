@@ -207,7 +207,7 @@ convert_phylo_to_network_with_ages <- function(phylo_tree, distance_matrix) {
   root_nodes <- setdiff(all_parents, all_children)
   
   if (length(root_nodes) > 0) {
-    root_label <- "Common ancestor - click me!"
+    root_label <- "Common ancestor"
     network_data <- rbind(data.frame(
       Parent = NA,
       Child = root_label,
@@ -484,7 +484,7 @@ convert_phylo_to_network_with_ages_paired <- function(phylo_tree, distance_matri
   root_nodes <- setdiff(all_parents, all_children)
   
   if (length(root_nodes) > 0) {
-    root_label <- "Common ancestor - click me!"
+    root_label <- "Common ancestor"
     network_data <- rbind(data.frame(
       Parent = NA,
       Child = root_label,

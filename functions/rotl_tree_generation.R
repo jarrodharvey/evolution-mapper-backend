@@ -299,7 +299,7 @@ convert_phylo_to_network <- function(phylo_tree, species_data) {
     orphaned_parents <- setdiff(all_parents, all_children)
     
     # Connect all orphaned parents to a single root
-    root_name <- "Common ancestor - click me!"
+    root_name <- "Common ancestor"
     
     if (length(orphaned_parents) > 0) {
       # For each orphaned parent, connect it to the root with correct node type
@@ -609,7 +609,7 @@ convert_phylo_to_network_paired <- function(phylo_tree, species_data) {
     orphaned_parents <- setdiff(all_parents, all_children)
     
     # Connect all orphaned parents to a single root
-    root_name <- "Common ancestor - click me!"
+    root_name <- "Common ancestor"
     
     if (length(orphaned_parents) > 0) {
       # For each orphaned parent, connect it to the root with correct node type

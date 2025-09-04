@@ -859,7 +859,7 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
     all_children <- unique(network_data$to)
     orphaned_parents <- setdiff(all_parents, all_children)
     
-    root_name <- "Common ancestor - click me!"
+    root_name <- "Common ancestor"
     
     if (length(orphaned_parents) > 0) {
       for (orphaned_parent in orphaned_parents) {
