@@ -556,7 +556,7 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
     update_progress_internal("creating_visualization", "in_progress", 
                            list(step = "Creating hybrid tree visualization"))
     
-    tree_html <- create_hybrid_tree_visualization(network_data, request_id, progress_token)
+    tree_html <- create_hybrid_tree_visualization(network_data, request_id, progress_token, expansion_speed)
     
     step_duration <- as.numeric(difftime(Sys.time(), step_start, units = "secs"))
     api_log_info(paste("[", request_id, "] Visualization created - Duration:", round(step_duration, 3), "s"))
@@ -960,7 +960,7 @@ transform_hybrid_to_info_panel_format <- function(network_data) {
 #' @param network_data Network data frame with age information
 #' @param request_id Optional request ID for logging correlation
 #' @return HTML string for CollapsibleTree
-create_hybrid_tree_visualization <- function(network_data, request_id = NULL, progress_token = NULL) {
+create_hybrid_tree_visualization <- function(network_data, request_id = NULL, progress_token = NULL, expansion_speed = 750) {
   if (is.null(request_id)) {
     request_id <- "viz_create"
   }

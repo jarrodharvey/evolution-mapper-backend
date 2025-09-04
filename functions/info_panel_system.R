@@ -171,6 +171,12 @@ has_extractable_taxonomic_name <- function(node_data) {
   # For example: "Spermatophyta (352.2 Mya)" should extract "Spermatophyta"
   if ("Name" %in% names(node_data) && !is.null(node_data$Name) && !is.na(node_data$Name)) {
     node_name <- as.character(node_data$Name)
+    
+    # Check for empty or zero-length node_name
+    if (length(node_name) == 0 || nchar(trimws(node_name)) == 0) {
+      return(FALSE)
+    }
+    
     # Extract taxonomic name from hybrid format like "GroupName (age Mya)"
     # Handle both parentheses format "Boreoeutheria (99.3 Mya)" and dot format
     if (grepl("\\s*\\([0-9]+\\.?[0-9]*\\s+Mya\\)", node_name)) {
@@ -919,10 +925,25 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
       taxonomic_name <- extract_taxonomic_name(node_info)
       
       # Skip if it's a generic ancestor name
+      # Add comprehensive null and length checks to prevent "argument is of length zero" error
       if (is.null(taxonomic_name) || 
-          grepl("^(Ancestor|Node)\\.+[A-Z]$", taxonomic_name) || 
-          grepl("^Common ancestor", taxonomic_name) ||
-          nchar(trimws(taxonomic_name)) <= 2) {
+          length(taxonomic_name) == 0 || 
+          is.na(taxonomic_name) ||
+          nchar(trimws(as.character(taxonomic_name))) <= 2) {
+        info_panel_data[item$index] <- format_panel_content(node_info)
+        next
+      }
+      
+      # Additional safety checks before using grepl
+      taxonomic_name_str <- as.character(taxonomic_name)
+      if (length(taxonomic_name_str) == 0 || is.na(taxonomic_name_str) || nchar(trimws(taxonomic_name_str)) == 0) {
+        info_panel_data[item$index] <- format_panel_content(node_info)
+        next
+      }
+      
+      # Now safe to use grepl with proper string
+      if (grepl("^(Ancestor|Node)\\.+[A-Z]$", taxonomic_name_str) || 
+          grepl("^Common ancestor", taxonomic_name_str)) {
         info_panel_data[item$index] <- format_panel_content(node_info)
         next
       }
@@ -1051,6 +1072,14 @@ extract_taxonomic_name <- function(node_info) {
     return(NULL)
   }
   
+  # Check if raw_name is NULL, NA, or empty
+  if (is.null(raw_name) || length(raw_name) == 0 || is.na(raw_name) || nchar(trimws(as.character(raw_name))) == 0) {
+    return(NULL)
+  }
+  
+  # Convert to character to ensure we have a proper string
+  raw_name <- as.character(raw_name)
+  
   # Extract taxonomic name from hybrid nodes like "Spermatophyta (352.2 Mya)" or "Boreoeutheria (99.3 Mya)" or "Clupeocephala (~532.4 Mya)"
   if (grepl("\\s*\\(~?[0-9]+\\.?[0-9]*\\s+Mya\\)", raw_name)) {
     # Extract just the taxonomic part before the age in parentheses (handles optional tilde)
@@ -1062,6 +1091,11 @@ extract_taxonomic_name <- function(node_info) {
     taxonomic_name <- trimws(taxonomic_name)
   } else {
     taxonomic_name <- raw_name
+  }
+  
+  # Final check to ensure we return NULL instead of empty string
+  if (is.null(taxonomic_name) || length(taxonomic_name) == 0 || is.na(taxonomic_name) || nchar(trimws(taxonomic_name)) == 0) {
+    return(NULL)
   }
   
   return(taxonomic_name)
@@ -1110,6 +1144,14 @@ add_wikipedia_data <- function(node_info) {
     return(node_info)  # Return unchanged if no name found
   }
   
+  # Check if raw_name is NULL, NA, or empty
+  if (is.null(raw_name) || length(raw_name) == 0 || is.na(raw_name) || nchar(trimws(as.character(raw_name))) == 0) {
+    return(node_info)  # Return unchanged if name is empty
+  }
+  
+  # Convert to character to ensure we have a proper string
+  raw_name <- as.character(raw_name)
+  
   # Extract taxonomic name from hybrid nodes like "Spermatophyta (352.2 Mya)" or "Boreoeutheria (99.3 Mya)" or "Clupeocephala (~532.4 Mya)"
   if (grepl("\\s*\\(~?[0-9]+\\.?[0-9]*\\s+Mya\\)", raw_name)) {
     # Extract just the taxonomic part before the age in parentheses (handles optional tilde)
@@ -1124,10 +1166,23 @@ add_wikipedia_data <- function(node_info) {
   }
   
   # Skip if it's a generic ancestor name
+  # Add comprehensive null and length checks to prevent "argument is of length zero" error
   if (is.null(taxonomic_name) || 
-      grepl("^(Ancestor|Node)\\.+[A-Z]$", taxonomic_name) || 
-      grepl("^Common ancestor", taxonomic_name) ||
-      nchar(trimws(taxonomic_name)) <= 2) {
+      length(taxonomic_name) == 0 || 
+      is.na(taxonomic_name) ||
+      nchar(trimws(as.character(taxonomic_name))) <= 2) {
+    return(node_info)
+  }
+  
+  # Additional safety checks before using grepl
+  taxonomic_name_str <- as.character(taxonomic_name)
+  if (length(taxonomic_name_str) == 0 || is.na(taxonomic_name_str) || nchar(trimws(taxonomic_name_str)) == 0) {
+    return(node_info)
+  }
+  
+  # Now safe to use grepl with proper string
+  if (grepl("^(Ancestor|Node)\\.+[A-Z]$", taxonomic_name_str) || 
+      grepl("^Common ancestor", taxonomic_name_str)) {
     return(node_info)
   }
   
