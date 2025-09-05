@@ -9,3 +9,14 @@ EVOLUTION_API_KEYS=your-api-key-1,your-api-key-2,your-api-key-3
 
 # CORS Configuration - comma-separated list of allowed origins
 CORS_ALLOWED_ORIGINS=http://localhost:3000,https://jarrod-evolution-mapper-app.com
+
+# DigitalOcean API Token (required for server provisioning)
+DO_PAT=your-digitalocean-api-token
+
+# DigitalOcean Droplet IP address (set during provisioning)
+DO_DROPLET_IP=your-droplet-ip-address
+
+# DigitalOcean Droplet Domain Name (optional - enables reverse proxy setup)
+# If set, the provisioning script will automatically configure HTTPS via Caddy
+# Example: your-domain.com or subdomain.your-domain.com
+DO_DROPLET_DOMAIN=your-domain.com
