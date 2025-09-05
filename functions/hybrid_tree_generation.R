@@ -9,7 +9,6 @@ library(collapsibleTree)
 library(RSQLite)
 library(DBI)
 library(dplyr)
-library(parallel)
 library(memoise)
 
 # Source shared logging configuration
@@ -216,13 +215,13 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
   }
   
   tryCatch({
-    # Configure logging for future worker process - write to same log file as main process
+    # Configure logging to write to same log file
     if (exists("log_appender", mode = "function")) {
-      # Ensure logs directory exists in worker
+      # Ensure logs directory exists
       if (!dir.exists("logs")) {
         dir.create("logs", recursive = TRUE)
       }
-      # Configure file appender to match main process logging
+      # Configure file appender for logging
       log_appender(appender_file("logs/api.log", append = TRUE), namespace = "evolution.api")
       log_layout(layout_simple, namespace = "evolution.api")
       log_threshold(INFO, namespace = "evolution.api")
@@ -299,8 +298,8 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
       datelife_result_wrapper <- list(success = TRUE, result = list())
       
     } else {
-      api_log_info(paste("[", request_id, "] STEP 2: Running ROTL and filtered DateLife queries in parallel...", sep=""))
-      update_progress_internal("parallel_queries", "in_progress", 
+      api_log_info(paste("[", request_id, "] STEP 2: Running ROTL and filtered DateLife queries sequentially...", sep=""))
+      update_progress_internal("sequential_queries", "in_progress", 
                              list(step = "ROTL and DateLife queries"))
       
       # Get filtered scientific names for DateLife (efficiency optimization)
@@ -321,67 +320,70 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
         api_log_info(paste("[", request_id, "]   Cleaned", cleaned_count, "scientific names"))
       }
     
-      # Create parallel cluster (use 2 cores for the two main API calls)
-      api_log_info(paste("[", request_id, "] Creating parallel cluster for ROTL and DateLife queries...", sep=""))
-      parallel_start <- Sys.time()
-      cl <- makeCluster(2)
+      # Run queries sequentially
+      sequential_start <- Sys.time()
       
-      # Export necessary libraries and data to cluster nodes
-      api_log_info(paste("[", request_id, "] Setting up cluster workers...", sep=""))
-      clusterEvalQ(cl, {
-        library(rotl)
-        library(datelife)
-        library(ape)
+      # Task 1: ROTL query
+      api_log_info(paste("[", request_id, "] Starting ROTL query with", nrow(valid_species), "OTT IDs...", sep=""))
+      update_progress_internal("rotl_query", "in_progress", 
+                             list(step = "ROTL phylogenetic tree query"))
+      
+      rotl_start <- Sys.time()
+      rotl_result <- tryCatch({
+        rotl_tree <- tol_induced_subtree(ott_ids = valid_species$ott)
+        list(success = TRUE, result = rotl_tree, task = "rotl")
+      }, error = function(e) {
+        list(success = FALSE, error = e$message, task = "rotl")
       })
-      clusterExport(cl, c("valid_species", "cleaned_datelife_names"), envir = environment())
+      rotl_duration <- as.numeric(difftime(Sys.time(), rotl_start, units = "secs"))
       
-      # Define parallel tasks
-      api_log_info(paste("[", request_id, "] Launching parallel tasks:", sep=""))
-      api_log_info(paste("[", request_id, "]   Task 1: ROTL query with", nrow(valid_species), "OTT IDs"))
-      api_log_info(paste("[", request_id, "]   Task 2: DateLife query with", length(cleaned_datelife_names), "filtered scientific names (efficiency optimization)"))
+      if (rotl_result$success) {
+        api_log_info(paste("[", request_id, "] ROTL query completed successfully - Duration:", round(rotl_duration, 3), "s"))
+      } else {
+        api_log_error(paste("[", request_id, "] ROTL query failed - Duration:", round(rotl_duration, 3), "s -", rotl_result$error))
+      }
       
-      parallel_results <- tryCatch({
-        parLapply(cl, list(
-          # Task 1: ROTL query
-          list(task = "rotl", data = valid_species),
-          # Task 2: DateLife query (filtered to only species with DateLife data)
-          list(task = "datelife", data = cleaned_datelife_names)
-        ), function(task_info) {
-          if (task_info$task == "rotl") {
-            tryCatch({
-              rotl_tree <- tol_induced_subtree(ott_ids = task_info$data$ott)
-              return(list(success = TRUE, result = rotl_tree, task = "rotl"))
-            }, error = function(e) {
-              return(list(success = FALSE, error = e$message, task = "rotl"))
-            })
-          } else if (task_info$task == "datelife") {
-            tryCatch({
-              # Use original DateLife function in parallel worker with filtered names
-              datelife_result <- get_datelife_result(input = task_info$data, get_spp_from_taxon = FALSE, reference_taxonomy = 'opentree')
-              return(list(success = TRUE, result = datelife_result, task = "datelife"))
-            }, error = function(e) {
-              return(list(success = FALSE, error = e$message, task = "datelife", result = list()))
-            })
-          }
-        })
-      }, finally = {
-        stopCluster(cl)
+      update_progress_internal("rotl_query", "completed", 
+                             list(duration_seconds = round(rotl_duration, 3),
+                                  success = rotl_result$success))
+      
+      # Task 2: DateLife query
+      api_log_info(paste("[", request_id, "] Starting DateLife query with", length(cleaned_datelife_names), "filtered scientific names...", sep=""))
+      update_progress_internal("datelife_query", "in_progress", 
+                             list(step = "DateLife chronogram query"))
+      
+      datelife_start <- Sys.time()
+      datelife_result_wrapper <- tryCatch({
+        # Use original DateLife function with filtered names
+        datelife_result <- get_datelife_result(input = cleaned_datelife_names, get_spp_from_taxon = FALSE, reference_taxonomy = 'opentree')
+        list(success = TRUE, result = datelife_result, task = "datelife")
+      }, error = function(e) {
+        list(success = FALSE, error = e$message, task = "datelife", result = list())
       })
+      datelife_duration <- as.numeric(difftime(Sys.time(), datelife_start, units = "secs"))
       
-      parallel_duration <- as.numeric(difftime(Sys.time(), parallel_start, units = "secs"))
+      if (datelife_result_wrapper$success) {
+        api_log_info(paste("[", request_id, "] DateLife query completed successfully - Duration:", round(datelife_duration, 3), "s"))
+        api_log_info(paste("[", request_id, "] Found", length(datelife_result_wrapper$result), "chronograms"))
+      } else {
+        api_log_error(paste("[", request_id, "] DateLife query failed - Duration:", round(datelife_duration, 3), "s -", datelife_result_wrapper$error))
+      }
       
-      # Extract results from parallel execution
-      rotl_result <- parallel_results[[1]]
-      datelife_result_wrapper <- parallel_results[[2]]
+      update_progress_internal("datelife_query", "completed", 
+                             list(duration_seconds = round(datelife_duration, 3),
+                                  success = datelife_result_wrapper$success,
+                                  chronograms_found = if(datelife_result_wrapper$success) length(datelife_result_wrapper$result) else 0))
+      
+      sequential_duration <- as.numeric(difftime(Sys.time(), sequential_start, units = "secs"))
     }
     
     step_duration <- as.numeric(difftime(Sys.time(), step_start, units = "secs"))
     api_log_info(paste("[", request_id, "] Step 2 completed - Duration:", round(step_duration, 3), "s", sep=""))
     
-    update_progress_internal("parallel_queries", "completed", 
+    update_progress_internal("sequential_queries", "completed", 
                            list(duration_seconds = round(step_duration, 3)))
     
-    api_log_info(paste("[", request_id, "] Processing parallel results...", sep=""))
+    api_log_info(paste("[", request_id, "] Processing query results...", sep=""))
     
     # Handle ROTL result
     if (!rotl_result$success || is.null(rotl_result$result)) {
