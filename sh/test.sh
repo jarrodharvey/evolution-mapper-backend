@@ -23,9 +23,11 @@ USE_PROGRESS=false
 USE_DROPLET_IP=false
 USE_DOMAIN=false
 USE_JSON=false
+USE_SPECIES=false
 COUNT=""
 OUTPUT_FILE=""
 EXPANSION_SPEED=""
+SPECIES_LIST=""
 BASE_URL="http://localhost:8000"
 
 # Parse arguments
@@ -46,6 +48,10 @@ for arg in "$@"; do
         --json)
             USE_JSON=true
             ;;
+        --species=*)
+            USE_SPECIES=true
+            SPECIES_LIST="${arg#*=}"
+            ;;
         --expansion-speed=*)
             EXPANSION_SPEED="${arg#*=}"
             ;;
@@ -54,6 +60,7 @@ for arg in "$@"; do
             echo ""
             echo "Options:"
             echo "  --simple              Use predefined simple species set"
+            echo "  --species=\"list\"      Use specific species list in format \"common (scientific)\""
             echo "  --progress            Use progress tracking instead of log streaming"
             echo "  --droplet-ip          Use DO_DROPLET_IP from .Renviron"
             echo "  --domain              Use DO_DROPLET_DOMAIN from .Renviron"
@@ -64,6 +71,9 @@ for arg in "$@"; do
             echo "Arguments:"
             echo "  count                 Number of species (3-20, default random 4-12)"
             echo "  output_file           Output file (default sh/random_hybrid_tree.html or .json with --json flag)"
+            echo ""
+            echo "Species List Format:"
+            echo "  \"Red-tailed hawk (Buteo jamaicensis), Human (Homo sapiens), Dog (Canis lupus)\""
             exit 0
             ;;
         *)
@@ -111,10 +121,57 @@ else
     echo "Using localhost: http://localhost:8000"
 fi
 
+# Parse species list if provided
+if [[ "$USE_SPECIES" == true ]]; then
+    echo "Step 1: Parsing provided species list..."
+    
+    # Initialize arrays
+    COMMON_ARRAY=()
+    SCIENTIFIC_ARRAY=()
+    
+    # Split species list on comma and parse each species
+    IFS=',' read -ra SPECIES_ENTRIES <<< "$SPECIES_LIST"
+    
+    for entry in "${SPECIES_ENTRIES[@]}"; do
+        # Trim whitespace
+        entry=$(echo "$entry" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        
+        # Parse format: "Common name (Scientific name)"
+        if [[ "$entry" =~ ^(.+)[[:space:]]\((.+)\)$ ]]; then
+            COMMON_NAME="${BASH_REMATCH[1]}"
+            SCIENTIFIC_NAME="${BASH_REMATCH[2]}"
+            
+            # Trim whitespace from extracted names
+            COMMON_NAME=$(echo "$COMMON_NAME" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            SCIENTIFIC_NAME=$(echo "$SCIENTIFIC_NAME" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            
+            echo "   🧬 $COMMON_NAME ($SCIENTIFIC_NAME)"
+            
+            # Add to arrays
+            COMMON_ARRAY+=("$COMMON_NAME")
+            SCIENTIFIC_ARRAY+=("$SCIENTIFIC_NAME")
+        else
+            echo "❌ Error: Invalid species format: '$entry'"
+            echo "Expected format: 'Common name (Scientific name)'"
+            exit 1
+        fi
+    done
+    
+    # Set count based on parsed species
+    COUNT=${#COMMON_ARRAY[@]}
+    
+    if [[ $COUNT -lt 2 ]]; then
+        echo "❌ Error: At least 2 species are required for tree generation"
+        exit 1
+    fi
+    
+    echo "✅ Successfully parsed $COUNT species from provided list"
+fi
+
 # Set defaults
 if [[ "$USE_SIMPLE" == true ]]; then
     COUNT=3  # Fixed count for simple mode
-else
+elif [[ "$USE_SPECIES" == false ]]; then
     # Set defaults - random count between 4-12 if not specified
     if [ -z "$COUNT" ]; then
         COUNT=$((4 + RANDOM % 9))  # Random number between 4 and 12
@@ -143,7 +200,9 @@ if [[ -n "$EXPANSION_SPEED" ]]; then
 fi
 
 echo "=== Hybrid Tree Generation Test ==="
-if [[ "$USE_SIMPLE" == true ]]; then
+if [[ "$USE_SPECIES" == true ]]; then
+    echo "Generating hybrid tree with user-provided species list ($COUNT species)..."
+elif [[ "$USE_SIMPLE" == true ]]; then
     echo "Generating simple hybrid tree with predefined species set..."
 else
     echo "Generating random hybrid tree with $COUNT species..."
@@ -210,9 +269,12 @@ if [[ "$USE_PROGRESS" == true ]]; then
     fi
 fi
 
-# Step 1: Select species (random or simple)
+# Step 1: Select species (random, simple, or user-provided)
 echo ""
-if [[ "$USE_SIMPLE" == true ]]; then
+if [[ "$USE_SPECIES" == true ]]; then
+    # Species already parsed above, skip to next step
+    echo "Using provided species list (already parsed)"
+elif [[ "$USE_SIMPLE" == true ]]; then
     echo "Step 1: Using predefined simple species set..."
     
     # Use predefined simple species set
@@ -277,7 +339,9 @@ echo "Step 2: Generating hybrid tree with /api/full-tree-dated..."
 echo "Common names: $COMMON_LIST"
 echo "Scientific names: $SCIENTIFIC_LIST"
 echo ""
-if [[ "$USE_SIMPLE" == true ]]; then
+if [[ "$USE_SPECIES" == true ]]; then
+    echo "🔄 Processing hybrid tree generation for user-provided species (this may take 30-90 seconds for $COUNT species)..."
+elif [[ "$USE_SIMPLE" == true ]]; then
     echo "🔄 Processing hybrid tree generation for simple species set (this may take 30-60 seconds)..."
 else
     echo "🔄 Processing hybrid tree generation (this may take 30-90 seconds for $COUNT species)..."
