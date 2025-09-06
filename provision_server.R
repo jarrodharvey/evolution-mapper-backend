@@ -194,70 +194,191 @@ check_domain_health <- function(domain) {
 # Function to set up reverse proxy with Caddy
 setup_reverse_proxy <- function(droplet, domain) {
   if (is.null(domain) || domain == "") {
-    cat("⚠️  No domain configured - skipping reverse proxy setup\n")
-    return(FALSE)
+    prov_log_error("No domain configured - cannot setup reverse proxy")
+    stop("❌ CRITICAL: No domain configured for reverse proxy setup")
   }
   
-  cat("🔧 Setting up reverse proxy for domain:", domain, "\n")
+  prov_log_info("🔧 Setting up reverse proxy for domain:", domain)
   
   # Install Caddy via snap
-  cat("Installing Caddy...\n")
+  prov_log_info("Installing Caddy...")
   tryCatch({
-    droplet_ssh(droplet, "sudo snap install caddy --classic")
-    cat("✅ Caddy installed successfully\n")
+    install_result <- capture.output(droplet_ssh(droplet, "sudo snap install caddy --classic && echo 'INSTALL_SUCCESS' || echo 'INSTALL_FAILED'"))
+    install_result <- paste(install_result, collapse = " ")
+    
+    if (!grepl("INSTALL_SUCCESS", install_result)) {
+      prov_log_error("Caddy installation failed with output:", install_result)
+      stop("❌ CRITICAL: Caddy installation failed")
+    }
+    
+    prov_log_success("Caddy installed successfully")
   }, error = function(e) {
-    cat("❌ Failed to install Caddy:", e$message, "\n")
-    stop("Caddy installation failed")
+    prov_log_error("Failed to install Caddy:", e$message)
+    stop("❌ CRITICAL: Caddy installation failed - ", e$message)
   })
   
-  # Configure Caddy
-  cat("Configuring Caddy...\n")
+  # Verify Caddy installation
+  prov_log_info("Verifying Caddy installation...")
+  tryCatch({
+    version_result <- capture.output(droplet_ssh(droplet, "caddy version && echo 'VERSION_SUCCESS' || echo 'VERSION_FAILED'"))
+    version_result <- paste(version_result, collapse = " ")
+    
+    if (!grepl("VERSION_SUCCESS", version_result)) {
+      prov_log_error("Caddy verification failed - binary not accessible")
+      stop("❌ CRITICAL: Caddy installation verification failed")
+    }
+    
+    prov_log_success("Caddy installation verified")
+  }, error = function(e) {
+    prov_log_error("Caddy verification failed:", e$message)
+    stop("❌ CRITICAL: Caddy installation verification failed - ", e$message)
+  })
+  
+  # Configure Caddy with proper paths and format
+  prov_log_info("Configuring Caddy...")
   caddyfile_content <- paste0(
     domain, " {\n",
-    "    reverse_proxy localhost:8000\n",
+    "\treverse_proxy localhost:8000\n",
     "}"
   )
   
   tryCatch({
-    droplet_ssh(droplet, "sudo mkdir -p /var/snap/caddy/current")
-    droplet_ssh(droplet, paste0('sudo tee /var/snap/caddy/current/Caddyfile > /dev/null << "EOF"\n', caddyfile_content, '\nEOF'))
-    cat("✅ Caddyfile configured\n")
+    # Create proper directory structure for snap Caddy
+    dir_result <- capture.output(droplet_ssh(droplet, "sudo mkdir -p /var/snap/caddy/common && echo 'DIR_SUCCESS' || echo 'DIR_FAILED'"))
+    dir_result <- paste(dir_result, collapse = " ")
+    
+    if (!grepl("DIR_SUCCESS", dir_result)) {
+      prov_log_error("Failed to create Caddy directory structure")
+      stop("❌ CRITICAL: Failed to create Caddy configuration directory")
+    }
+    
+    # Write Caddyfile to correct location
+    caddyfile_result <- capture.output(droplet_ssh(droplet, paste0(
+      'sudo tee /var/snap/caddy/common/Caddyfile > /dev/null << "EOF"\n', 
+      caddyfile_content, 
+      '\nEOF && echo "CADDYFILE_SUCCESS" || echo "CADDYFILE_FAILED"'
+    )))
+    caddyfile_result <- paste(caddyfile_result, collapse = " ")
+    
+    if (!grepl("CADDYFILE_SUCCESS", caddyfile_result)) {
+      prov_log_error("Failed to create Caddyfile")
+      stop("❌ CRITICAL: Failed to create Caddyfile")
+    }
+    
+    # Convert Caddyfile to JSON format (required by snap Caddy)
+    prov_log_info("Converting Caddyfile to JSON format...")
+    json_result <- capture.output(droplet_ssh(droplet, paste0(
+      'cd /var/snap/caddy/common && ',
+      'sudo caddy adapt --config Caddyfile --adapter caddyfile --pretty > caddy.json && ',
+      'echo "JSON_SUCCESS" || echo "JSON_FAILED"'
+    )))
+    json_result <- paste(json_result, collapse = " ")
+    
+    if (!grepl("JSON_SUCCESS", json_result)) {
+      prov_log_error("Failed to convert Caddyfile to JSON:", json_result)
+      stop("❌ CRITICAL: Failed to convert Caddyfile to JSON format")
+    }
+    
+    # Verify JSON configuration was created
+    verify_result <- capture.output(droplet_ssh(droplet, "ls -la /var/snap/caddy/common/caddy.json && echo 'VERIFY_SUCCESS' || echo 'VERIFY_FAILED'"))
+    verify_result <- paste(verify_result, collapse = " ")
+    
+    if (!grepl("VERIFY_SUCCESS", verify_result)) {
+      prov_log_error("Caddy JSON configuration not found after creation")
+      stop("❌ CRITICAL: Caddy JSON configuration missing")
+    }
+    
+    prov_log_success("Caddyfile configured and converted to JSON successfully")
   }, error = function(e) {
-    cat("❌ Failed to configure Caddy:", e$message, "\n")
-    stop("Caddy configuration failed")
+    prov_log_error("Failed to configure Caddy:", e$message)
+    stop("❌ CRITICAL: Caddy configuration failed - ", e$message)
   })
   
-  # Restart Caddy
-  cat("Restarting Caddy...\n")
+  # Start Caddy service (not restart, since it may not be running)
+  prov_log_info("Starting Caddy service...")
   tryCatch({
-    droplet_ssh(droplet, "sudo snap restart caddy")
-    cat("✅ Caddy restarted successfully\n")
+    # Stop any existing service first
+    droplet_ssh(droplet, "sudo snap stop caddy.server 2>/dev/null || true")
+    
+    # Start the service
+    start_result <- capture.output(droplet_ssh(droplet, "sudo snap start caddy.server && echo 'START_SUCCESS' || echo 'START_FAILED'"))
+    start_result <- paste(start_result, collapse = " ")
+    
+    if (!grepl("START_SUCCESS", start_result)) {
+      prov_log_error("Failed to start Caddy service:", start_result)
+      stop("❌ CRITICAL: Failed to start Caddy service")
+    }
+    
+    # Verify service is running
+    Sys.sleep(3) # Brief wait for service to initialize
+    status_result <- capture.output(droplet_ssh(droplet, "snap services caddy | grep caddy.server | grep active && echo 'STATUS_SUCCESS' || echo 'STATUS_FAILED'"))
+    status_result <- paste(status_result, collapse = " ")
+    
+    if (!grepl("STATUS_SUCCESS", status_result)) {
+      prov_log_error("Caddy service failed to start properly:", status_result)
+      
+      # Get detailed logs for troubleshooting
+      logs_result <- capture.output(droplet_ssh(droplet, "journalctl -u snap.caddy.server --no-pager -n 10"))
+      prov_log_error("Caddy service logs:", paste(logs_result, collapse = " "))
+      
+      stop("❌ CRITICAL: Caddy service is not running after start command")
+    }
+    
+    prov_log_success("Caddy service started successfully")
   }, error = function(e) {
-    cat("❌ Failed to restart Caddy:", e$message, "\n")
-    stop("Caddy restart failed")
+    prov_log_error("Failed to start Caddy service:", e$message)
+    stop("❌ CRITICAL: Caddy service startup failed - ", e$message)
   })
   
+  # Verify Caddy is listening on expected ports
+  prov_log_info("Verifying Caddy is listening on ports 80/443...")
+  Sys.sleep(5) # Allow time for SSL certificate provisioning to start
+  
+  tryCatch({
+    port_result <- capture.output(droplet_ssh(droplet, "ss -tlnp | grep -E ':(80|443)' && echo 'PORTS_SUCCESS' || echo 'PORTS_FAILED'"))
+    port_result <- paste(port_result, collapse = " ")
+    
+    if (!grepl("PORTS_SUCCESS", port_result)) {
+      prov_log_error("Caddy is not listening on HTTP/HTTPS ports:", port_result)
+      
+      # Get service status for troubleshooting
+      service_status <- capture.output(droplet_ssh(droplet, "snap services caddy"))
+      prov_log_error("Caddy service status:", paste(service_status, collapse = " "))
+      
+      stop("❌ CRITICAL: Caddy is not listening on expected ports 80/443")
+    }
+    
+    prov_log_success("Caddy is listening on HTTP/HTTPS ports")
+  }, error = function(e) {
+    prov_log_error("Failed to verify Caddy ports:", e$message)
+    stop("❌ CRITICAL: Caddy port verification failed - ", e$message)
+  })
+  
+  prov_log_success("Reverse proxy setup completed successfully")
   return(TRUE)
 }
 
 # Function to verify domain accessibility after reverse proxy setup
 verify_domain_health <- function(domain, max_attempts = 6, wait_seconds = 10) {
   if (is.null(domain) || domain == "") {
+    prov_log_info("No domain configured - skipping verification")
     return(TRUE)  # Skip if no domain configured
   }
   
-  cat("Waiting for reverse proxy to initialize...\n")
-  Sys.sleep(30)  # Initial wait for Caddy to fully start
+  prov_log_info("Waiting for reverse proxy to initialize (SSL certificate provisioning)...")
+  Sys.sleep(30)  # Initial wait for Caddy to fully start and provision SSL
+  
+  prov_log_info("Starting domain health verification for:", domain)
   
   for (attempt in 1:max_attempts) {
-    cat("Attempt", attempt, "of", max_attempts, "- Testing domain:", domain, "\n")
+    prov_log_info("Attempt", attempt, "of", max_attempts, "- Testing domain:", domain)
     
     # Test HTTPS endpoint (Caddy should auto-provision SSL)
     https_cmd <- paste0("curl -s -o /dev/null -w '%{http_code}' --connect-timeout 15 'https://", domain, "/api/health'")
     https_code <- suppressWarnings(system(https_cmd, intern = TRUE, ignore.stderr = TRUE))
     
     if (length(https_code) > 0 && https_code[1] == "200") {
-      cat("✅ Domain health check successful via HTTPS\n")
+      prov_log_success("Domain health check successful via HTTPS")
       return(TRUE)
     }
     
@@ -266,17 +387,31 @@ verify_domain_health <- function(domain, max_attempts = 6, wait_seconds = 10) {
     http_code <- suppressWarnings(system(http_cmd, intern = TRUE, ignore.stderr = TRUE))
     
     if (length(http_code) > 0 && http_code[1] == "200") {
-      cat("✅ Domain health check successful via HTTP\n")
+      prov_log_success("Domain health check successful via HTTP")
       return(TRUE)
     }
     
+    # Log detailed failure information
+    https_status <- if (length(https_code) > 0) https_code[1] else "no_response"
+    http_status <- if (length(http_code) > 0) http_code[1] else "no_response"
+    
+    prov_log_warn(paste0(
+      "Attempt ", attempt, " failed - HTTPS: ", https_status, 
+      ", HTTP: ", http_status
+    ))
+    
     if (attempt < max_attempts) {
-      cat("❌ Domain not responding, waiting", wait_seconds, "seconds before retry...\n")
+      prov_log_info("Waiting", wait_seconds, "seconds before retry...")
       Sys.sleep(wait_seconds)
     }
   }
   
-  cat("❌ Domain health check failed after", max_attempts, "attempts\n")
+  prov_log_error("❌ DOMAIN VERIFICATION FAILED")
+  prov_log_error("Domain:", domain, "is not accessible after", max_attempts, "attempts")
+  prov_log_error("Final HTTPS status:", if (exists("https_status")) https_status else "unknown")
+  prov_log_error("Final HTTP status:", if (exists("http_status")) http_status else "unknown")
+  prov_log_error("This indicates the reverse proxy is not working correctly")
+  
   return(FALSE)
 }
 
@@ -978,14 +1113,31 @@ WantedBy=multi-user.target
     # Check if reverse proxy setup is needed
     domain <- Sys.getenv("DO_DROPLET_DOMAIN")
     if (check_domain_health(domain)) {
-      cat("\n🔧 Setting up reverse proxy...\n")
-      if (setup_reverse_proxy(droplet, domain)) {
-        cat("\n⏳ Verifying reverse proxy setup...\n")
-        if (!verify_domain_health(domain)) {
-          stop("❌ Reverse proxy setup failed - domain not accessible after configuration")
+      prov_log_info("🔧 Domain not accessible - reverse proxy setup required")
+      
+      tryCatch({
+        # Attempt reverse proxy setup - this will stop() on failure
+        reverse_proxy_success <- setup_reverse_proxy(droplet, domain)
+        
+        if (!reverse_proxy_success) {
+          prov_log_error("Reverse proxy setup returned FALSE - configuration failed")
+          stop("❌ CRITICAL: Reverse proxy setup failed")
         }
-        cat("✅ Reverse proxy setup successful!\n")
-      }
+        
+        prov_log_info("⏳ Verifying reverse proxy is working...")
+        if (!verify_domain_health(domain)) {
+          prov_log_error("Domain verification failed after reverse proxy setup")
+          prov_log_error("Domain:", domain, "is still not accessible")
+          stop("❌ CRITICAL: Reverse proxy setup completed but domain is not accessible")
+        }
+        
+        prov_log_success("Reverse proxy setup and verification successful!")
+      }, error = function(e) {
+        prov_log_error("Reverse proxy setup failed with error:", e$message)
+        stop("❌ CRITICAL: Provisioning failed during reverse proxy setup - ", e$message)
+      })
+    } else {
+      prov_log_info("✅ Domain already accessible - reverse proxy not needed")
     }
     
     # Print summary
