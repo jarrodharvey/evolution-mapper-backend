@@ -330,6 +330,32 @@ setup_reverse_proxy <- function(droplet, domain) {
     stop("❌ CRITICAL: Caddy service startup failed - ", e$message)
   })
   
+  # Enable Caddy service for automatic startup on boot
+  prov_log_info("Enabling Caddy service for automatic startup...")
+  tryCatch({
+    enable_result <- capture.output(droplet_ssh(droplet, "sudo systemctl enable snap.caddy.server && echo 'ENABLE_SUCCESS' || echo 'ENABLE_FAILED'"))
+    enable_result <- paste(enable_result, collapse = " ")
+    
+    if (!grepl("ENABLE_SUCCESS", enable_result)) {
+      prov_log_error("Failed to enable Caddy service for auto-start:", enable_result)
+      stop("❌ CRITICAL: Failed to enable Caddy service for automatic startup")
+    }
+    
+    # Verify service is enabled
+    enabled_check <- capture.output(droplet_ssh(droplet, "systemctl is-enabled snap.caddy.server && echo 'VERIFY_SUCCESS' || echo 'VERIFY_FAILED'"))
+    enabled_check <- paste(enabled_check, collapse = " ")
+    
+    if (!grepl("VERIFY_SUCCESS", enabled_check)) {
+      prov_log_error("Caddy service enable verification failed:", enabled_check)
+      stop("❌ CRITICAL: Caddy service is not enabled for automatic startup")
+    }
+    
+    prov_log_success("Caddy service enabled for automatic startup on boot")
+  }, error = function(e) {
+    prov_log_error("Failed to enable Caddy service:", e$message)
+    stop("❌ CRITICAL: Caddy service enable failed - ", e$message)
+  })
+  
   # Verify Caddy is listening on expected ports
   prov_log_info("Verifying Caddy is listening on ports 80/443...")
   Sys.sleep(5) # Allow time for SSL certificate provisioning to start
