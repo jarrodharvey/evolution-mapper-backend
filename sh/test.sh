@@ -22,6 +22,7 @@ USE_SIMPLE=false
 USE_PROGRESS=false
 USE_DROPLET_IP=false
 USE_DOMAIN=false
+USE_JSON=false
 COUNT=""
 OUTPUT_FILE=""
 EXPANSION_SPEED=""
@@ -42,6 +43,9 @@ for arg in "$@"; do
         --domain)
             USE_DOMAIN=true
             ;;
+        --json)
+            USE_JSON=true
+            ;;
         --expansion-speed=*)
             EXPANSION_SPEED="${arg#*=}"
             ;;
@@ -53,12 +57,13 @@ for arg in "$@"; do
             echo "  --progress            Use progress tracking instead of log streaming"
             echo "  --droplet-ip          Use DO_DROPLET_IP from .Renviron"
             echo "  --domain              Use DO_DROPLET_DOMAIN from .Renviron"
+            echo "  --json                Save JSON response without HTML and open JSON file"
             echo "  --expansion-speed=N   Set tree expansion speed in milliseconds"
             echo "  --help                Show this help message"
             echo ""
             echo "Arguments:"
             echo "  count                 Number of species (3-20, default random 4-12)"
-            echo "  output_file           Output HTML file (default sh/random_hybrid_tree.html)"
+            echo "  output_file           Output file (default sh/random_hybrid_tree.html or .json with --json flag)"
             exit 0
             ;;
         *)
@@ -122,7 +127,12 @@ else
     fi
 fi
 
-OUTPUT_FILE=${OUTPUT_FILE:-"sh/random_hybrid_tree.html"}
+# Set default output file based on --json flag
+if [[ "$USE_JSON" == true ]]; then
+    OUTPUT_FILE=${OUTPUT_FILE:-"sh/random_hybrid_tree.json"}
+else
+    OUTPUT_FILE=${OUTPUT_FILE:-"sh/random_hybrid_tree.html"}
+fi
 
 # Validate expansion speed parameter
 if [[ -n "$EXPANSION_SPEED" ]]; then
@@ -137,6 +147,11 @@ if [[ "$USE_SIMPLE" == true ]]; then
     echo "Generating simple hybrid tree with predefined species set..."
 else
     echo "Generating random hybrid tree with $COUNT species..."
+fi
+if [[ "$USE_JSON" == true ]]; then
+    echo "Output mode: JSON (without HTML)"
+else
+    echo "Output mode: HTML visualization"
 fi
 echo "Output will be saved to: $OUTPUT_FILE"
 if [[ -n "$EXPANSION_SPEED" ]]; then
@@ -417,19 +432,34 @@ echo "📡 Received response from API, processing results..."
 if echo "$HYBRID_RESPONSE" | jq -r '.success' | grep -q "true"; then
     echo "✅ Hybrid tree generated successfully!"
     
-    # Extract HTML content (handle array format)
-    echo "$HYBRID_RESPONSE" | jq -r 'if (.html | type) == "array" then .html[0] else .html end' > "$OUTPUT_FILE"
+    if [[ "$USE_JSON" == true ]]; then
+        # Save JSON without HTML
+        echo "$HYBRID_RESPONSE" | jq 'del(.html)' > "$OUTPUT_FILE"
+        echo "💾 JSON extraction successful (HTML removed)!"
+    else
+        # Extract HTML content (handle array format)
+        echo "$HYBRID_RESPONSE" | jq -r 'if (.html | type) == "array" then .html[0] else .html end' > "$OUTPUT_FILE"
+        echo "💾 HTML extraction successful!"
+    fi
     
     if [[ $? -eq 0 && -s "$OUTPUT_FILE" ]]; then
-        echo "💾 HTML extraction successful!"
         echo "   📁 File: $OUTPUT_FILE"
         echo "   📏 Size: $(wc -c < "$OUTPUT_FILE") bytes"
         
-        # Verify it's valid HTML
-        if head -1 "$OUTPUT_FILE" | grep -q "<!DOCTYPE html>"; then
-            echo "   ✅ Valid HTML document confirmed"
+        if [[ "$USE_JSON" == true ]]; then
+            # Verify it's valid JSON
+            if jq empty "$OUTPUT_FILE" 2>/dev/null; then
+                echo "   ✅ Valid JSON document confirmed"
+            else
+                echo "   ⚠️  Warning: File may not be valid JSON"
+            fi
         else
-            echo "   ⚠️  Warning: File may not be valid HTML"
+            # Verify it's valid HTML
+            if head -1 "$OUTPUT_FILE" | grep -q "<!DOCTYPE html>"; then
+                echo "   ✅ Valid HTML document confirmed"
+            else
+                echo "   ⚠️  Warning: File may not be valid HTML"
+            fi
         fi
         
         # Extract and display tree information (handle array format)
@@ -463,36 +493,42 @@ if echo "$HYBRID_RESPONSE" | jq -r '.success' | grep -q "true"; then
         fi
         
         echo ""
-        echo "🚀 Opening tree visualization..."
+        if [[ "$USE_JSON" == true ]]; then
+            echo "🚀 Opening JSON file..."
+        else
+            echo "🚀 Opening tree visualization..."
+        fi
         open "$OUTPUT_FILE"
         
-        echo ""
-        echo "🔧 For troubleshooting, compare with other endpoints:"
-        echo ""
-        echo "📋 Topology-only tree (/api/tree) - save and open:"
-        echo "curl -X POST -H \"X-API-Key: $API_KEY\" \\"
-        echo "  -H \"Content-Type: application/x-www-form-urlencoded\" \\"
-        echo "  -d \"common_names=$COMMON_LIST&scientific_names=$SCIENTIFIC_LIST\" \\"
-        echo "  \"$BASE_URL/api/tree\" | jq -r 'if (.html | type) == \"array\" then .html[0] else .html end' > sh/comparison_topology_tree.html && open sh/comparison_topology_tree.html"
-        echo ""
-        echo "📋 DateLife-only tree (/api/dated-tree) - save and open:"
-        echo "curl -X POST -H \"X-API-Key: $API_KEY\" \\"
-        echo "  -H \"Content-Type: application/x-www-form-urlencoded\" \\"
-        echo "  -d \"common_names=$COMMON_LIST&scientific_names=$SCIENTIFIC_LIST&allow_partial_response=true\" \\"
-        echo "  \"$BASE_URL/api/dated-tree\" | jq -r 'if (.html | type) == \"array\" then .html[0] else .html end' > sh/comparison_datelife_tree.html && open sh/comparison_datelife_tree.html"
-        echo ""
-        echo "💡 These commands will:"
-        echo "   • Extract HTML from JSON response"  
-        echo "   • Save to comparison files in sh/ directory"
-        echo "   • Automatically open in your browser"
-        echo ""
-        echo "📊 Files for comparison:"
-        echo "   🌳 Hybrid (current):     sh/random_hybrid_tree.html"
-        echo "   🔗 Topology-only:        sh/comparison_topology_tree.html"  
-        echo "   ⏰ DateLife-only:        sh/comparison_datelife_tree.html"
+        if [[ "$USE_JSON" == false ]]; then
+            echo ""
+            echo "🔧 For troubleshooting, compare with other endpoints:"
+            echo ""
+            echo "📋 Topology-only tree (/api/tree) - save and open:"
+            echo "curl -X POST -H \"X-API-Key: $API_KEY\" \\"
+            echo "  -H \"Content-Type: application/x-www-form-urlencoded\" \\"
+            echo "  -d \"common_names=$COMMON_LIST&scientific_names=$SCIENTIFIC_LIST\" \\"
+            echo "  \"$BASE_URL/api/tree\" | jq -r 'if (.html | type) == \"array\" then .html[0] else .html end' > sh/comparison_topology_tree.html && open sh/comparison_topology_tree.html"
+            echo ""
+            echo "📋 DateLife-only tree (/api/dated-tree) - save and open:"
+            echo "curl -X POST -H \"X-API-Key: $API_KEY\" \\"
+            echo "  -H \"Content-Type: application/x-www-form-urlencoded\" \\"
+            echo "  -d \"common_names=$COMMON_LIST&scientific_names=$SCIENTIFIC_LIST&allow_partial_response=true\" \\"
+            echo "  \"$BASE_URL/api/dated-tree\" | jq -r 'if (.html | type) == \"array\" then .html[0] else .html end' > sh/comparison_datelife_tree.html && open sh/comparison_datelife_tree.html"
+            echo ""
+            echo "💡 These commands will:"
+            echo "   • Extract HTML from JSON response"  
+            echo "   • Save to comparison files in sh/ directory"
+            echo "   • Automatically open in your browser"
+            echo ""
+            echo "📊 Files for comparison:"
+            echo "   🌳 Hybrid (current):     sh/random_hybrid_tree.html"
+            echo "   🔗 Topology-only:        sh/comparison_topology_tree.html"  
+            echo "   ⏰ DateLife-only:        sh/comparison_datelife_tree.html"
+        fi
         
     else
-        echo "❌ Error saving HTML file"
+        echo "❌ Error saving output file"
         exit 1
     fi
 else
