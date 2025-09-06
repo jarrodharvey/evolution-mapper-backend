@@ -4,6 +4,40 @@
 # This script provisions a DigitalOcean droplet with R, required packages, and deploys the API
 
 library(analogsea)
+library(logger)
+
+# Set up logging
+log_dir <- "logs"
+if (!dir.exists(log_dir)) {
+  dir.create(log_dir, recursive = TRUE)
+}
+log_appender(appender_tee(file.path(log_dir, "provision.log")))
+log_threshold(INFO)
+
+# Provision logging helper functions
+prov_log_info <- function(...) {
+  msg <- paste(..., sep = " ")
+  cat(msg, "\n")
+  log_info(msg)
+}
+
+prov_log_warn <- function(...) {
+  msg <- paste(..., sep = " ")
+  cat("⚠️ ", msg, "\n")
+  log_warn(msg)
+}
+
+prov_log_error <- function(...) {
+  msg <- paste(..., sep = " ")
+  cat("❌ ", msg, "\n")
+  log_error(msg)
+}
+
+prov_log_success <- function(...) {
+  msg <- paste(..., sep = " ")
+  cat("✅ ", msg, "\n")
+  log_info(paste("SUCCESS:", msg))
+}
 
 # Configuration
 REQUIRED_FILES <- c(
@@ -41,7 +75,7 @@ Sys.setenv(DO_PAT = do_pat)
 
 # Function to validate required files exist
 validate_project_files <- function() {
-  cat("Validating project files...\n")
+  prov_log_info("Validating project files...")
   missing_files <- c()
   
   for (file in REQUIRED_FILES) {
@@ -51,32 +85,36 @@ validate_project_files <- function() {
   }
   
   if (length(missing_files) > 0) {
+    prov_log_error("Missing required files:", paste(missing_files, collapse = ", "))
     stop("Missing required files: ", paste(missing_files, collapse = ", "))
   }
-  cat("✅ All required project files found\n")
+  prov_log_success("All required project files found")
 }
 
 # Function to get droplet by name or use first available
 get_target_droplet <- function(droplet_name = NULL) {
-  cat("Connecting to droplet...\n")
+  prov_log_info("Connecting to droplet...")
   
   all_droplets <- droplets()
   if (length(all_droplets) == 0) {
+    prov_log_error("No droplets found in your DigitalOcean account")
     stop("No droplets found in your DigitalOcean account")
   }
   
   if (!is.null(droplet_name)) {
     for (droplet in all_droplets) {
       if (droplet$name == droplet_name) {
+        prov_log_info("Found target droplet:", droplet_name)
         return(droplet)
       }
     }
+    prov_log_error("Droplet not found:", droplet_name)
     stop("Droplet '", droplet_name, "' not found")
   }
   
   # Use first droplet if no name specified
   droplet <- all_droplets[[1]]
-  cat("Using droplet:", droplet$name, "at", droplet$networks$v4[[1]]$ip_address, "\n")
+  prov_log_info("Using droplet:", droplet$name, "at", droplet$networks$v4[[1]]$ip_address)
   return(droplet)
 }
 
@@ -135,7 +173,7 @@ check_domain_health <- function(domain) {
   https_cmd <- paste0("curl -s -o /dev/null -w '%{http_code}' --connect-timeout 10 'https://", domain, "/api/health'")
   https_code <- suppressWarnings(system(https_cmd, intern = TRUE, ignore.stderr = TRUE))
   
-  if (length(https_code) > 0 && https_code == "200") {
+  if (length(https_code) > 0 && https_code[1] == "200") {
     cat("✅ Domain accessible via HTTPS - reverse proxy not needed\n")
     return(FALSE)
   }
@@ -144,7 +182,7 @@ check_domain_health <- function(domain) {
   http_cmd <- paste0("curl -s -o /dev/null -w '%{http_code}' --connect-timeout 10 'http://", domain, "/api/health'")
   http_code <- suppressWarnings(system(http_cmd, intern = TRUE, ignore.stderr = TRUE))
   
-  if (length(http_code) > 0 && http_code == "200") {
+  if (length(http_code) > 0 && http_code[1] == "200") {
     cat("✅ Domain accessible via HTTP - reverse proxy not needed\n")
     return(FALSE)
   }
@@ -218,7 +256,7 @@ verify_domain_health <- function(domain, max_attempts = 6, wait_seconds = 10) {
     https_cmd <- paste0("curl -s -o /dev/null -w '%{http_code}' --connect-timeout 15 'https://", domain, "/api/health'")
     https_code <- suppressWarnings(system(https_cmd, intern = TRUE, ignore.stderr = TRUE))
     
-    if (length(https_code) > 0 && https_code == "200") {
+    if (length(https_code) > 0 && https_code[1] == "200") {
       cat("✅ Domain health check successful via HTTPS\n")
       return(TRUE)
     }
@@ -227,7 +265,7 @@ verify_domain_health <- function(domain, max_attempts = 6, wait_seconds = 10) {
     http_cmd <- paste0("curl -s -o /dev/null -w '%{http_code}' --connect-timeout 15 'http://", domain, "/api/health'")
     http_code <- suppressWarnings(system(http_cmd, intern = TRUE, ignore.stderr = TRUE))
     
-    if (length(http_code) > 0 && http_code == "200") {
+    if (length(http_code) > 0 && http_code[1] == "200") {
       cat("✅ Domain health check successful via HTTP\n")
       return(TRUE)
     }
@@ -254,7 +292,7 @@ verify_deployment <- function(droplet) {
   health_cmd <- paste0("curl -s -o /dev/null -w '%{http_code}' 'http://", ip_address, ":8000/api/health'")
   health_code <- system(health_cmd, intern = TRUE)
   
-  if (health_code != "200") {
+  if (health_code[1] != "200") {
     cat("❌ Health check failed - HTTP", health_code, "\n")
     return(FALSE)
   }
@@ -265,7 +303,7 @@ verify_deployment <- function(droplet) {
     test_cmd <- paste0("curl -s -H 'X-API-Key: ", api_keys[1], "' -o /dev/null -w '%{http_code}' 'http://", ip_address, ":8000/api/species?limit=1'")
     api_code <- system(test_cmd, intern = TRUE)
     
-    if (api_code != "200") {
+    if (api_code[1] != "200") {
       cat("❌ API key test failed - HTTP", api_code, "\n")
       return(FALSE)
     }
@@ -277,7 +315,7 @@ verify_deployment <- function(droplet) {
 
 # Main provisioning logic
 main <- function(droplet_name = NULL, allowed_ip = NULL) {
-  cat("🚀 Starting Evolution Mapper API provisioning...\n\n")
+  prov_log_info("🚀 Starting Evolution Mapper API provisioning...")
   
   # Validate project files
   validate_project_files()
@@ -287,181 +325,308 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
   
   tryCatch({
     # Update R to current version first
-    cat("Updating R to current version...\n")
+    prov_log_info("Updating R to current version...")
     tryCatch({
       droplet_ssh(droplet, "sudo systemctl stop plumber-evolution-mapper || true")
-      droplet_ssh(droplet, "sudo apt update")
-      if (droplet_ssh(droplet, "echo $?") != "0") {
+      update_result <- capture.output(droplet_ssh(droplet, "sudo apt update && echo 'SUCCESS' || echo 'FAILED'"))
+      update_result <- paste(update_result, collapse = " ")
+      if (!grepl("SUCCESS", update_result)) {
         stop("Failed to update package lists")
       }
       
-      droplet_ssh(droplet, "sudo apt install -y software-properties-common dirmngr")
-      if (droplet_ssh(droplet, "echo $?") != "0") {
+      install_result <- capture.output(droplet_ssh(droplet, "sudo apt install -y software-properties-common dirmngr && echo 'SUCCESS' || echo 'FAILED'"))
+      install_result <- paste(install_result, collapse = " ")
+      if (!grepl("SUCCESS", install_result)) {
         stop("Failed to install software-properties-common and dirmngr")
       }
       
-      droplet_ssh(droplet, "wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | sudo tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc")
-      if (droplet_ssh(droplet, "echo $?") != "0") {
-        stop("Failed to add CRAN GPG key")
+      # Detect Ubuntu version and set appropriate CRAN repository
+      prov_log_info("Detecting Ubuntu version for CRAN repository configuration...")
+      ubuntu_version <- capture.output(droplet_ssh(droplet, "lsb_release -cs"))
+      ubuntu_version <- paste(ubuntu_version, collapse = " ")
+      ubuntu_version <- trimws(ubuntu_version)
+      prov_log_info("Detected Ubuntu codename:", ubuntu_version)
+      
+      # Map Ubuntu codenames to CRAN repository names
+      cran_repo_map <- list(
+        "jammy" = "jammy-cran40",      # Ubuntu 22.04 LTS
+        "focal" = "focal-cran40",      # Ubuntu 20.04 LTS  
+        "noble" = "noble-cran40",      # Ubuntu 24.04 LTS
+        "mantic" = "mantic-cran40",    # Ubuntu 23.10
+        "lunar" = "lunar-cran40",      # Ubuntu 23.04
+        "kinetic" = "kinetic-cran40",  # Ubuntu 22.10
+        "impish" = "impish-cran40",    # Ubuntu 21.10
+        "hirsute" = "hirsute-cran40",  # Ubuntu 21.04
+        "groovy" = "groovy-cran40",    # Ubuntu 20.10
+        "plucky" = "noble-cran40"      # Ubuntu 25.04 - use noble (24.04) as fallback
+      )
+      
+      # Get the appropriate CRAN repository suffix
+      cran_suffix <- cran_repo_map[[ubuntu_version]]
+      if (is.null(cran_suffix)) {
+        prov_log_warn("Ubuntu version", ubuntu_version, "not directly supported by CRAN, using standard Ubuntu repositories")
+        # Use standard Ubuntu repositories
+        upgrade_result <- capture.output(droplet_ssh(droplet, "sudo apt install -y r-base r-base-dev && echo 'SUCCESS' || echo 'FAILED'"))
+        upgrade_result <- paste(upgrade_result, collapse = " ")
+        if (!grepl("SUCCESS", upgrade_result)) {
+          stop("Failed to install R from standard Ubuntu repositories")
+        }
+      } else {
+        prov_log_info("Using CRAN repository suffix:", cran_suffix)
+        
+        # Add CRAN GPG key
+        gpg_result <- capture.output(droplet_ssh(droplet, "wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | sudo tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc && echo 'SUCCESS' || echo 'FAILED'"))
+        gpg_result <- paste(gpg_result, collapse = " ")
+        if (!grepl("SUCCESS", gpg_result)) {
+          stop("Failed to add CRAN GPG key")
+        }
+        
+        # Add the appropriate CRAN repository
+        cran_repo_line <- paste0("deb https://cloud.r-project.org/bin/linux/ubuntu ", cran_suffix, "/")
+        prov_log_info("Adding CRAN repository:", cran_repo_line)
+        droplet_ssh(droplet, paste0("echo \"", cran_repo_line, "\" | sudo tee /etc/apt/sources.list.d/cran-r.list"))
+        
+        # Update package lists with new repository
+        update2_result <- capture.output(droplet_ssh(droplet, "sudo apt update && echo 'SUCCESS' || echo 'FAILED'"))
+        update2_result <- paste(update2_result, collapse = " ")
+        if (!grepl("SUCCESS", update2_result)) {
+          stop("Failed to update package lists after adding CRAN repository")
+        }
+        
+        # Install R from CRAN repository
+        upgrade_result <- capture.output(droplet_ssh(droplet, "sudo apt install -y r-base r-base-dev && echo 'SUCCESS' || echo 'FAILED'"))
+        upgrade_result <- paste(upgrade_result, collapse = " ")
+        if (!grepl("SUCCESS", upgrade_result)) {
+          prov_log_warn("CRAN installation failed, falling back to standard Ubuntu repositories")
+          # Remove CRAN repository and try standard repos
+          droplet_ssh(droplet, "sudo rm -f /etc/apt/sources.list.d/cran-r.list")
+          droplet_ssh(droplet, "sudo apt update")
+          
+          upgrade_result2 <- capture.output(droplet_ssh(droplet, "sudo apt install -y r-base r-base-dev && echo 'SUCCESS' || echo 'FAILED'"))
+          upgrade_result2 <- paste(upgrade_result2, collapse = " ")
+          if (!grepl("SUCCESS", upgrade_result2)) {
+            stop("Failed to install R from both CRAN and standard repositories")
+          }
+        }
       }
       
-      droplet_ssh(droplet, "echo \"deb https://cloud.r-project.org/bin/linux/ubuntu jammy-cran40/\" | sudo tee /etc/apt/sources.list.d/cran-r.list")
-      droplet_ssh(droplet, "sudo apt update")
-      if (droplet_ssh(droplet, "echo $?") != "0") {
-        stop("Failed to update package lists after adding CRAN repository")
-      }
-      
-      droplet_ssh(droplet, "sudo apt upgrade -y r-base r-base-dev")
-      if (droplet_ssh(droplet, "echo $?") != "0") {
-        stop("Failed to upgrade R base packages")
-      }
-      
-      cat("✅ R update completed successfully\n")
+      prov_log_success("R update completed successfully")
     }, error = function(e) {
       stop("❌ R update failed: ", e$message)
     })
     
     # Verify R version
     r_version_result <- tryCatch({
-      droplet_ssh(droplet, "R --version | head -1")
+      version_output <- capture.output(droplet_ssh(droplet, "R --version | head -1"))
+      paste(version_output, collapse = " ")
     }, error = function(e) {
       stop("❌ Failed to verify R version: ", e$message)
     })
     cat("✅ R version verified:", r_version_result, "\n")
     
-    # Install system dependencies (including gfortran for Hmisc)
-    cat("Installing system dependencies...\n")
-    system_deps <- c("libcurl4-openssl-dev", "libssl-dev", "libxml2-dev", "libsqlite3-dev", "pandoc", "librsvg2-dev", "gfortran")
+    # Install system dependencies (including gfortran for Hmisc and libsodium-dev for plumber)
+    prov_log_info("Installing system dependencies...")
+    system_deps <- c("libcurl4-openssl-dev", "libssl-dev", "libxml2-dev", "libsqlite3-dev", "pandoc", "librsvg2-dev", "gfortran", "libsodium-dev")
+    
+    # Install memory-intensive packages as pre-compiled Ubuntu binaries to avoid OOM issues
+    prov_log_info("Installing memory-intensive R packages as Ubuntu binaries...")
+    ubuntu_r_packages <- c("r-cran-rsqlite", "r-cran-dbi")
+    for (pkg in ubuntu_r_packages) {
+      prov_log_info("Installing Ubuntu binary package:", pkg)
+      droplet_ssh(droplet, paste0("sudo apt-get install -y ", pkg))
+    }
     
     tryCatch({
       for (dep in system_deps) {
-        cat("Installing system dependency:", dep, "\n")
-        result <- droplet_ssh(droplet, paste0("sudo apt install -y ", dep, " && echo 'SUCCESS' || echo 'FAILED'"))
+        prov_log_info("Installing system dependency:", dep)
+        result <- capture.output(droplet_ssh(droplet, paste0("sudo apt install -y ", dep, " && echo 'SUCCESS' || echo 'FAILED'")))
+        result <- paste(result, collapse = " ")
         if (!grepl("SUCCESS", result)) {
           stop("Failed to install system dependency: ", dep)
         }
       }
-      cat("✅ All system dependencies installed successfully\n")
+      prov_log_success("All system dependencies installed successfully")
     }, error = function(e) {
       stop("❌ System dependency installation failed: ", e$message)
     })
     
-    # Install R packages with systematic verification
-    cat("Installing R packages systematically...\n")
+    # Install R packages system-wide for all users (required for service to work)
+    prov_log_info("Installing R packages system-wide...")
+    
+    # Create system library directory if it doesn't exist
+    droplet_ssh(droplet, "sudo mkdir -p /usr/local/lib/R/site-library")
+    droplet_ssh(droplet, "sudo chown -R root:staff /usr/local/lib/R/site-library")
+    droplet_ssh(droplet, "sudo chmod 755 /usr/local/lib/R/site-library")
+    
+    # Set proper permissions for system library (critical for non-root user access)
+    prov_log_info("Setting proper permissions for system library...")
+    droplet_ssh(droplet, "sudo find /usr/local/lib/R/site-library -type d -exec chmod 755 {} \\;")
+    droplet_ssh(droplet, "sudo find /usr/local/lib/R/site-library -type f -exec chmod 644 {} \\;")
+    prov_log_success("System library permissions configured")
     
     # CRAN packages that work with current R
+    # CRAN packages (excluding memory-intensive ones that are installed as Ubuntu binaries)
     cran_packages <- c(
       "plumber", "rlang", "rotl", "ape", "collapsibleTree", "htmlwidgets", 
-      "RSQLite", "DBI", "dplyr", "colorspace", "jsonlite", "httr", "httr2",
+      "dplyr", "colorspace", "jsonlite", "httr", "httr2",
       "logger", "memoise", "cachem", "future", "promises", "remotes",
-      "Hmisc", "taxize", "rphylopic"
+      "Hmisc", "taxize", "rphylopic", "phylobase"
     )
     
     for (pkg in cran_packages) {
-      cat("Checking R package:", pkg, "\n")
-      tryCatch({
-        # Check if package is already installed and get available version
-        check_result <- droplet_ssh(droplet, paste0(
-          'R -e "',
-          'installed_version <- NULL; ',
-          'available_version <- NULL; ',
-          'if (require(', pkg, ', quietly=TRUE)) { installed_version <- as.character(packageVersion(\'', pkg, '\')); }; ',
-          'available_version <- available.packages(repos=\'https://cloud.r-project.org\')[\'', pkg, '\', \'Version\']; ',
-          'if (!is.null(installed_version) && !is.null(available_version) && installed_version == available_version) { ',
-          'cat(\'CURRENT\'); ',
-          '} else if (!is.null(installed_version)) { ',
-          'cat(\'OUTDATED\', installed_version, available_version); ',
-          '} else { ',
-          'cat(\'MISSING\'); ',
-          '}"'
-        ))
-        
-        if (grepl("CURRENT", check_result)) {
-          cat("✅ Package", pkg, "is already current - skipping installation\n")
-        } else if (grepl("MISSING", check_result)) {
-          cat("Installing missing package:", pkg, "\n")
-          install_result <- droplet_ssh(droplet, paste0(
-            'R -e "install.packages(\'', pkg, '\', repos=\'https://cloud.r-project.org\'); ',
-            'if (require(', pkg, ', quietly=TRUE)) { cat(\'SUCCESS\') } else { cat(\'FAILED\') }"'
-          ))
-          
-          if (!grepl("SUCCESS", install_result)) {
-            stop("Package installation verification failed")
-          }
-          
-          cat("✅ Successfully installed:", pkg, "\n")
-        } else if (grepl("OUTDATED", check_result)) {
-          versions <- strsplit(check_result, " ")[[1]]
-          cat("Updating package", pkg, "from version", versions[2], "to", versions[3], "\n")
-          install_result <- droplet_ssh(droplet, paste0(
-            'R -e "install.packages(\'', pkg, '\', repos=\'https://cloud.r-project.org\'); ',
-            'if (require(', pkg, ', quietly=TRUE)) { cat(\'SUCCESS\') } else { cat(\'FAILED\') }"'
-          ))
-          
-          if (!grepl("SUCCESS", install_result)) {
-            stop("Package update verification failed")
-          }
-          
-          cat("✅ Successfully updated:", pkg, "\n")
-        }
+      # Check if package is already installed system-wide
+      prov_log_info("Checking if package already installed system-wide:", pkg)
+      check_result <- tryCatch({
+        result <- capture.output(droplet_ssh(droplet, paste0(
+          'R -e "if (require(', pkg, ', lib.loc=\'/usr/local/lib/R/site-library\', quietly=TRUE)) { cat(\'ALREADY_INSTALLED\') } else { cat(\'NOT_INSTALLED\') }"'
+        )))
+        paste(result, collapse = " ")
       }, error = function(e) {
-        stop("❌ Failed to process R package '", pkg, "': ", e$message)
+        "NOT_INSTALLED"
+      })
+      
+      if (grepl("ALREADY_INSTALLED", check_result)) {
+        prov_log_info("Package already installed, skipping:", pkg)
+        next
+      }
+      
+      prov_log_info("Installing R package system-wide:", pkg)
+      tryCatch({
+        # Install to system library so all users can access it
+        install_result <- capture.output(droplet_ssh(droplet, paste0(
+          'sudo R -e "install.packages(\'', pkg, '\', repos=\'https://cloud.r-project.org\', lib=\'/usr/local/lib/R/site-library\', quiet=FALSE); ',
+          'if (require(', pkg, ', lib.loc=\'/usr/local/lib/R/site-library\', quietly=TRUE)) { cat(\'VERIFY_SUCCESS\') } else { cat(\'VERIFY_FAILED\') }"'
+        )))
+        install_result <- paste(install_result, collapse = " ")
+        
+        if (grepl("VERIFY_FAILED", install_result) || !grepl("VERIFY_SUCCESS", install_result)) {
+          prov_log_error("Package installation verification failed for:", pkg)
+          prov_log_error("Installation output:", install_result)
+          stop("Package installation verification failed for: ", pkg)
+        }
+        
+        prov_log_success("Successfully installed system-wide:", pkg)
+      }, error = function(e) {
+        prov_log_error("Failed to install R package system-wide:", pkg, "-", e$message)
+        stop("❌ Failed to install R package '", pkg, "' system-wide: ", e$message)
       })
     }
     
-    # GitHub packages (removed from CRAN)
-    cat("Installing packages from GitHub...\n")
+    # GitHub packages (removed from CRAN) - install system-wide
+    prov_log_info("Installing packages from GitHub system-wide...")
+    prov_log_info("⏳ NOTE: GitHub package installation may take 15-30 minutes due to complex dependencies (especially datelife with Bioconductor packages). Please be patient...")
     github_packages <- list(
       list(name = "bold", repo = "ropensci/bold"),
       list(name = "datelife", repo = "phylotastic/datelife")
     )
     
+    # Install R package system dependencies proactively using RSPM API
+    prov_log_info("Checking for additional system dependencies for R packages...")
+    all_r_packages <- c(cran_packages, sapply(github_packages, function(x) x$name))
+    
+    tryCatch({
+      # Use remotes package to get system requirements from RSPM
+      sys_deps_result <- capture.output(droplet_ssh(droplet, paste0(
+        'sudo R -e "',
+        'if (!require(remotes, quietly=TRUE)) install.packages(\\"remotes\\", repos=\\"https://cloud.r-project.org\\"); ',
+        'library(remotes); ',
+        'packages <- c(\\"', paste(all_r_packages, collapse = '\\", \\"'), '\\"); ',
+        'deps <- character(0); ',
+        'for (pkg in packages) { ',
+        '  tryCatch({ ',
+        '    pkg_deps <- system_requirements(\\"ubuntu\\", \\"20.04\\", package=pkg); ',
+        '    if (length(pkg_deps) > 0) deps <- c(deps, pkg_deps); ',
+        '  }, error = function(e) { }); ',
+        '}; ',
+        'unique_deps <- unique(deps); ',
+        'if (length(unique_deps) > 0) { ',
+        '  cat(\\"SYSTEM_DEPS:\\", paste(unique_deps, collapse=\\" \\")); ',
+        '} else { ',
+        '  cat(\\"NO_ADDITIONAL_DEPS\\"); ',
+        '}"'
+      )))
+      
+      sys_deps_output <- paste(sys_deps_result, collapse = " ")
+      
+      if (grepl("SYSTEM_DEPS:", sys_deps_output)) {
+        # Extract dependencies after "SYSTEM_DEPS:"
+        deps_match <- regmatches(sys_deps_output, regexpr("SYSTEM_DEPS: .*", sys_deps_output))
+        deps_line <- gsub("SYSTEM_DEPS: ", "", deps_match)
+        individual_deps <- unique(unlist(strsplit(deps_line, " ")))
+        individual_deps <- individual_deps[individual_deps != ""]
+        
+        prov_log_info("Installing", length(individual_deps), "additional system dependencies for R packages...")
+        for (dep in individual_deps) {
+          prov_log_info("Installing system dependency:", dep)
+          droplet_ssh(droplet, paste0("sudo apt-get install -y ", dep))
+        }
+        prov_log_success("Additional R package system dependencies installed")
+      } else {
+        prov_log_info("No additional system dependencies required beyond base installation")
+      }
+      
+    }, error = function(e) {
+      prov_log_warn("Could not automatically determine additional system dependencies:", e$message)
+      prov_log_info("Continuing with existing manual system dependency list...")
+    })
+    
     tryCatch({
       for (pkg_info in github_packages) {
-        cat("Checking GitHub package:", pkg_info$name, "\n")
+        # Check if GitHub package is already installed system-wide
+        prov_log_info("Checking if GitHub package already installed system-wide:", pkg_info$name)
+        check_result <- tryCatch({
+          result <- capture.output(droplet_ssh(droplet, paste0(
+            'R -e "if (require(', pkg_info$name, ', lib.loc=\'/usr/local/lib/R/site-library\', quietly=TRUE)) { cat(\'ALREADY_INSTALLED\') } else { cat(\'NOT_INSTALLED\') }"'
+          )))
+          paste(result, collapse = " ")
+        }, error = function(e) {
+          "NOT_INSTALLED"
+        })
         
-        # Check if package is already installed
-        check_result <- droplet_ssh(droplet, paste0(
-          'R -e "if (require(', pkg_info$name, ', quietly=TRUE)) { cat(\'INSTALLED\') } else { cat(\'MISSING\') }"'
-        ))
-        
-        if (grepl("INSTALLED", check_result)) {
-          cat("✅ Package", pkg_info$name, "is already installed - skipping GitHub installation\n")
-        } else {
-          cat("Installing missing GitHub package:", pkg_info$name, "from", pkg_info$repo, "\n")
-          
-          github_install_result <- droplet_ssh(droplet, paste0(
-            'R -e "library(remotes); install_github(\'', pkg_info$repo, '\'); ',
-            'if (require(', pkg_info$name, ', quietly=TRUE)) { cat(\'SUCCESS\') } else { cat(\'FAILED\') }"'
-          ))
-          
-          if (!grepl("SUCCESS", github_install_result)) {
-            stop("GitHub package installation verification failed for: ", pkg_info$name)
-          }
-          
-          cat("✅ Successfully installed:", pkg_info$name, "\n")
+        if (grepl("ALREADY_INSTALLED", check_result)) {
+          prov_log_info("GitHub package already installed, skipping:", pkg_info$name)
+          next
         }
+        
+        prov_log_info("Installing GitHub package system-wide:", pkg_info$name, "from", pkg_info$repo)
+        
+        github_install_result <- capture.output(droplet_ssh(droplet, paste0(
+          'sudo R -e "library(remotes, lib.loc=\'/usr/local/lib/R/site-library\'); ',
+          'install_github(\'', pkg_info$repo, '\', lib=\'/usr/local/lib/R/site-library\', quiet=FALSE); ',
+          'if (require(', pkg_info$name, ', lib.loc=\'/usr/local/lib/R/site-library\', quietly=TRUE)) { cat(\'VERIFY_SUCCESS\') } else { cat(\'VERIFY_FAILED\') }"'
+        )))
+        github_install_result <- paste(github_install_result, collapse = " ")
+        
+        if (grepl("VERIFY_FAILED", github_install_result) || !grepl("VERIFY_SUCCESS", github_install_result)) {
+          prov_log_error("GitHub package installation verification failed for:", pkg_info$name)
+          prov_log_error("Installation output:", github_install_result)
+          stop("GitHub package installation verification failed for: ", pkg_info$name)
+        }
+        
+        prov_log_success("Successfully installed system-wide:", pkg_info$name)
       }
-      cat("✅ All GitHub packages installed successfully\n")
+      prov_log_success("All GitHub packages installed system-wide successfully")
     }, error = function(e) {
+      prov_log_error("GitHub package installation failed:", e$message)
       stop("❌ GitHub package installation failed: ", e$message)
     })
     
-    # Perform comprehensive package verification
-    cat("Performing comprehensive package verification...\n")
+    # Perform comprehensive package verification system-wide
+    prov_log_info("Performing comprehensive package verification system-wide...")
     target_packages <- c("datelife", "bold", "taxize", "Hmisc", "rphylopic", "remotes", "plumber", "rlang")
     
     tryCatch({
       for (pkg in target_packages) {
-        cat("Verifying package:", pkg, "\n")
+        prov_log_info("Verifying system-wide package:", pkg)
         
-        # Get detailed package information
-        verify_result <- droplet_ssh(droplet, paste0(
-          'R -e "if (require(', pkg, ', quietly=TRUE)) { ',
+        # Get detailed package information from system library
+        verify_result <- capture.output(droplet_ssh(droplet, paste0(
+          'R -e "if (require(', pkg, ', lib.loc=\'/usr/local/lib/R/site-library\', quietly=TRUE)) { ',
           'version <- as.character(packageVersion(\'', pkg, '\')); ',
           'cat(\'SUCCESS\', version); ',
           '} else { cat(\'FAILED\') }"'
-        ))
+        )))
+        verify_result <- paste(verify_result, collapse = " ")
         
         if (!grepl("SUCCESS", verify_result)) {
           stop("Package verification failed for: ", pkg)
@@ -470,12 +635,12 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
         # Extract version from result
         version_info <- strsplit(verify_result, " ")[[1]]
         if (length(version_info) > 1) {
-          cat("✅ Verified:", pkg, "version", version_info[2], "\n")
+          prov_log_success("Verified system-wide:", pkg, "version", version_info[2])
         } else {
-          cat("✅ Verified:", pkg, "\n")
+          prov_log_success("Verified system-wide:", pkg)
         }
       }
-      cat("✅ All", length(target_packages), "critical packages verified successfully\n")
+      prov_log_success("All", length(target_packages), "critical packages verified system-wide successfully")
     }, error = function(e) {
       stop("❌ Package verification failed: ", e$message)
     })
@@ -483,42 +648,60 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
     # Deploy the API with selective file upload
     cat("Deploying Evolution Mapper API...\n")
     
+    # Create plumber user if it doesn't exist
+    prov_log_info("Creating plumber user...")
+    tryCatch({
+      user_check <- capture.output(droplet_ssh(droplet, "id plumber 2>/dev/null && echo 'EXISTS' || echo 'MISSING'"))
+      user_check <- paste(user_check, collapse = " ")
+      
+      if (grepl("MISSING", user_check)) {
+        droplet_ssh(droplet, "sudo useradd -r -s /bin/false -d /var/plumber plumber")
+        prov_log_success("Plumber user created")
+      } else {
+        prov_log_info("Plumber user already exists")
+      }
+    }, error = function(e) {
+      prov_log_warn("Could not create plumber user:", e$message)
+    })
+    
     # Create deployment directory structure
     tryCatch({
       droplet_ssh(droplet, "sudo mkdir -p /var/plumber/evolution-mapper")
       droplet_ssh(droplet, "sudo chown -R plumber:plumber /var/plumber")
       
       # Verify directory creation
-      dir_check <- droplet_ssh(droplet, "ls -ld /var/plumber/evolution-mapper")
+      dir_check <- capture.output(droplet_ssh(droplet, "ls -ld /var/plumber/evolution-mapper"))
+      dir_check <- paste(dir_check, collapse = " ")
       if (!grepl("plumber plumber", dir_check)) {
         stop("Failed to create or set permissions for deployment directory")
       }
       
-      cat("✅ Deployment directory created successfully\n")
+      prov_log_success("Deployment directory created successfully")
     }, error = function(e) {
       stop("❌ Failed to create deployment directory: ", e$message)
     })
     
     # Upload core files (excluding .claude/, screenshots/, unnecessary files)
-    cat("Uploading core application files...\n")
+    prov_log_info("Uploading core application files...")
     tryCatch({
       droplet_upload(droplet, "plumber.R", "/tmp/plumber.R")
       droplet_ssh(droplet, "mv /tmp/plumber.R /var/plumber/evolution-mapper/plumber.R")
       
       # Verify file upload
-      file_check <- droplet_ssh(droplet, "ls -la /var/plumber/evolution-mapper/plumber.R")
+      file_check <- capture.output(droplet_ssh(droplet, "ls -la /var/plumber/evolution-mapper/plumber.R"))
+      file_check <- paste(file_check, collapse = " ")
       if (!grepl("plumber.R", file_check)) {
         stop("plumber.R file not found after upload")
       }
       
-      cat("✅ plumber.R uploaded successfully\n")
+      prov_log_success("plumber.R uploaded successfully")
     }, error = function(e) {
       stop("❌ Failed to upload plumber.R: ", e$message)
     })
     
     # Upload functions directory
     tryCatch({
-      tar_result <- system("tar -czf /tmp/functions.tar.gz functions/ --exclude='.*' --exclude='*.tmp'")
+      tar_result <- system("tar -czf /tmp/functions.tar.gz --exclude='.*' --exclude='*.tmp' functions/")
       if (tar_result != 0) {
         stop("Failed to create functions tar archive")
       }
@@ -527,18 +710,19 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
       droplet_ssh(droplet, "cd /var/plumber/evolution-mapper && tar -xzf /tmp/functions.tar.gz && rm /tmp/functions.tar.gz")
       
       # Verify functions directory exists
-      functions_check <- droplet_ssh(droplet, "ls -ld /var/plumber/evolution-mapper/functions")
+      functions_check <- capture.output(droplet_ssh(droplet, "ls -ld /var/plumber/evolution-mapper/functions"))
+      functions_check <- paste(functions_check, collapse = " ")
       if (!grepl("functions", functions_check)) {
         stop("Functions directory not found after upload and extraction")
       }
       
-      cat("✅ Functions directory uploaded successfully\n")
+      prov_log_success("Functions directory uploaded successfully")
     }, error = function(e) {
       stop("❌ Failed to upload functions directory: ", e$message)
     })
     
     # Upload and create data directory with database
-    cat("Uploading database...\n")
+    prov_log_info("Uploading database...")
     tryCatch({
       data_tar_result <- system("tar -czf /tmp/data.tar.gz data/")
       if (data_tar_result != 0) {
@@ -549,35 +733,37 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
       droplet_ssh(droplet, "cd /var/plumber/evolution-mapper && tar -xzf /tmp/data.tar.gz && rm /tmp/data.tar.gz")
       
       # Verify database file exists
-      db_check <- droplet_ssh(droplet, "ls -la /var/plumber/evolution-mapper/data/species.sqlite")
+      db_check <- capture.output(droplet_ssh(droplet, "ls -la /var/plumber/evolution-mapper/data/species.sqlite"))
+      db_check <- paste(db_check, collapse = " ")
       if (!grepl("species.sqlite", db_check)) {
         stop("Database file not found after upload")
       }
       
-      cat("✅ Database uploaded successfully\n")
+      prov_log_success("Database uploaded successfully")
     }, error = function(e) {
       stop("❌ Failed to upload database: ", e$message)
     })
     
     # Create progress directory for progress tokens
-    cat("Creating progress directory...\n")
+    prov_log_info("Creating progress directory...")
     tryCatch({
       droplet_ssh(droplet, "mkdir -p /var/plumber/evolution-mapper/progress")
       droplet_ssh(droplet, "chmod 755 /var/plumber/evolution-mapper/progress")
       
       # Verify progress directory creation
-      progress_check <- droplet_ssh(droplet, "ls -ld /var/plumber/evolution-mapper/progress")
+      progress_check <- capture.output(droplet_ssh(droplet, "ls -ld /var/plumber/evolution-mapper/progress"))
+      progress_check <- paste(progress_check, collapse = " ")
       if (!grepl("progress", progress_check)) {
         stop("Progress directory not created successfully")
       }
       
-      cat("✅ Progress directory created successfully\n")
+      prov_log_success("Progress directory created successfully")
     }, error = function(e) {
       stop("❌ Failed to create progress directory: ", e$message)
     })
     
     # Setup systemd service
-    cat("Setting up systemd service...\n")
+    prov_log_info("Setting up systemd service...")
     systemd_service <- '
 [Unit]
 Description=Plumber Evolution Mapper API
@@ -600,38 +786,41 @@ WantedBy=multi-user.target
       droplet_ssh(droplet, paste0('sudo tee /etc/systemd/system/plumber-evolution-mapper.service > /dev/null << "EOF"', systemd_service, 'EOF'))
       
       # Verify service file creation
-      service_check <- droplet_ssh(droplet, "ls -la /etc/systemd/system/plumber-evolution-mapper.service")
+      service_check <- capture.output(droplet_ssh(droplet, "ls -la /etc/systemd/system/plumber-evolution-mapper.service"))
+      service_check <- paste(service_check, collapse = " ")
       if (!grepl("plumber-evolution-mapper.service", service_check)) {
         stop("Systemd service file not created")
       }
       
-      droplet_ssh(droplet, "sudo systemctl daemon-reload")
-      reload_result <- droplet_ssh(droplet, "echo $?")
-      if (reload_result != "0") {
+      reload_result <- capture.output(droplet_ssh(droplet, "sudo systemctl daemon-reload && echo 'SUCCESS' || echo 'FAILED'"))
+      reload_result <- paste(reload_result, collapse = " ")
+      if (!grepl("SUCCESS", reload_result)) {
         stop("Failed to reload systemd daemon")
       }
       
-      droplet_ssh(droplet, "sudo systemctl enable plumber-evolution-mapper")
-      enable_result <- droplet_ssh(droplet, "echo $?")
-      if (enable_result != "0") {
+      enable_result <- capture.output(droplet_ssh(droplet, "sudo systemctl enable plumber-evolution-mapper && echo 'SUCCESS' || echo 'FAILED'"))
+      enable_result <- paste(enable_result, collapse = " ")
+      if (!grepl("SUCCESS", enable_result)) {
         stop("Failed to enable systemd service")
       }
       
-      cat("✅ Systemd service configured successfully\n")
+      prov_log_success("Systemd service configured successfully")
     }, error = function(e) {
       stop("❌ Failed to setup systemd service: ", e$message)
     })
     
     # Fix missing rlang dependency
-    cat("Fixing rlang dependency in plumber.R...\n")
+    prov_log_info("Fixing rlang dependency in plumber.R...")
     droplet_ssh(droplet, 'cd /var/plumber/evolution-mapper && echo "library(rlang)" > temp_fix.txt && echo "" >> temp_fix.txt && cat plumber.R >> temp_fix.txt && mv temp_fix.txt plumber.R')
     
-    # Create run.R script for systemd
-    cat("Creating run.R script...\n")
+    # Create run.R script for systemd with system library path
+    prov_log_info("Creating run.R script...")
     run_r_content <- paste0(
       "# Evolution Mapper API Startup Script\n",
       "# Environment variables are set by systemd service\n",
       "setwd(\"/var/plumber/evolution-mapper\")\n\n",
+      "# Set library path to include system library (required for service user)\n",
+      ".libPaths(c('/usr/local/lib/R/site-library', .libPaths()))\n\n",
       "# Load required libraries\n",
       "library(rlang)\n",
       "library(plumber)\n\n",
@@ -653,19 +842,20 @@ WantedBy=multi-user.target
     droplet_ssh(droplet, paste0('cat > /var/plumber/evolution-mapper/run.R << "EOF"\n', run_r_content, 'EOF'))
     
     # Upload local .Renviron to server (ensures server matches local configuration)
-    cat("Syncing local .Renviron to server...\n")
+    prov_log_info("Syncing local .Renviron to server...")
     if (file.exists(".Renviron")) {
       tryCatch({
         droplet_upload(droplet, ".Renviron", "/tmp/.Renviron")
         droplet_ssh(droplet, "mv /tmp/.Renviron /var/plumber/evolution-mapper/.Renviron")
         
         # Verify .Renviron upload
-        renviron_check <- droplet_ssh(droplet, "ls -la /var/plumber/evolution-mapper/.Renviron")
+        renviron_check <- capture.output(droplet_ssh(droplet, "ls -la /var/plumber/evolution-mapper/.Renviron"))
+        renviron_check <- paste(renviron_check, collapse = " ")
         if (!grepl(".Renviron", renviron_check)) {
           stop(".Renviron file not found after upload")
         }
         
-        cat("✅ Local .Renviron synced to server\n")
+        prov_log_success("Local .Renviron synced to server")
       }, error = function(e) {
         stop("❌ Failed to upload .Renviron: ", e$message)
       })
@@ -674,7 +864,7 @@ WantedBy=multi-user.target
     }
     
     # Configure environment variables
-    cat("Configuring environment variables...\n")
+    prov_log_info("Configuring environment variables...")
     evolution_api_keys <- Sys.getenv("EVOLUTION_API_KEYS")
     if (evolution_api_keys == "") {
       stop("❌ EVOLUTION_API_KEYS not found in .Renviron. Please set secure API keys before deployment.")
@@ -690,8 +880,8 @@ WantedBy=multi-user.target
       stop("❌ CORS_ALLOWED_ORIGINS cannot be empty")
     }
     
-    cat("Configured CORS origins:", cors_origins, "\n")
-    cat("Configured API keys:", substr(evolution_api_keys, 1, 10), "...\n")
+    prov_log_info("Configured CORS origins:", cors_origins)
+    prov_log_info("Configured API keys:", substr(evolution_api_keys, 1, 10), "...")
     
     # Set up systemd environment configuration
     cat("Setting up systemd environment...\n")
@@ -699,7 +889,8 @@ WantedBy=multi-user.target
       droplet_ssh(droplet, "sudo mkdir -p /etc/systemd/system/plumber-evolution-mapper.service.d")
       
       # Verify directory creation
-      env_dir_check <- droplet_ssh(droplet, "ls -ld /etc/systemd/system/plumber-evolution-mapper.service.d")
+      env_dir_check <- capture.output(droplet_ssh(droplet, "ls -ld /etc/systemd/system/plumber-evolution-mapper.service.d"))
+      env_dir_check <- paste(env_dir_check, collapse = " ")
       if (!grepl("plumber-evolution-mapper.service.d", env_dir_check)) {
         stop("Failed to create systemd environment directory")
       }
@@ -708,13 +899,15 @@ WantedBy=multi-user.target
         "[Service]\n",
         "Environment=\"EVOLUTION_API_KEYS=", evolution_api_keys, "\"\n",
         "Environment=\"CORS_ALLOWED_ORIGINS=", cors_origins, "\"\n",
-        "Environment=\"HOME=/var/plumber/evolution-mapper\"\n"
+        "Environment=\"HOME=/var/plumber/evolution-mapper\"\n",
+        "Environment=\"R_LIBS_SITE=/usr/local/lib/R/site-library\"\n"
       )
       
       droplet_ssh(droplet, paste0('sudo tee /etc/systemd/system/plumber-evolution-mapper.service.d/environment.conf > /dev/null << "EOF"\n', env_config, 'EOF'))
       
       # Verify environment config creation
-      env_config_check <- droplet_ssh(droplet, "ls -la /etc/systemd/system/plumber-evolution-mapper.service.d/environment.conf")
+      env_config_check <- capture.output(droplet_ssh(droplet, "ls -la /etc/systemd/system/plumber-evolution-mapper.service.d/environment.conf"))
+      env_config_check <- paste(env_config_check, collapse = " ")
       if (!grepl("environment.conf", env_config_check)) {
         stop("Failed to create systemd environment configuration")
       }
@@ -727,15 +920,15 @@ WantedBy=multi-user.target
     # Reload and start the service
     cat("Starting API service...\n")
     tryCatch({
-      droplet_ssh(droplet, "sudo systemctl daemon-reload")
-      daemon_reload_result <- droplet_ssh(droplet, "echo $?")
-      if (daemon_reload_result != "0") {
+      daemon_reload_result <- capture.output(droplet_ssh(droplet, "sudo systemctl daemon-reload && echo 'SUCCESS' || echo 'FAILED'"))
+      daemon_reload_result <- paste(daemon_reload_result, collapse = " ")
+      if (!grepl("SUCCESS", daemon_reload_result)) {
         stop("Failed to reload systemd daemon")
       }
       
-      droplet_ssh(droplet, "sudo systemctl restart plumber-evolution-mapper")
-      restart_result <- droplet_ssh(droplet, "echo $?")
-      if (restart_result != "0") {
+      restart_result <- capture.output(droplet_ssh(droplet, "sudo systemctl restart plumber-evolution-mapper && echo 'SUCCESS' || echo 'FAILED'"))
+      restart_result <- paste(restart_result, collapse = " ")
+      if (!grepl("SUCCESS", restart_result)) {
         stop("Failed to restart plumber service")
       }
       
@@ -750,10 +943,12 @@ WantedBy=multi-user.target
     
     tryCatch({
       # Check service status
-      service_status <- droplet_ssh(droplet, "sudo systemctl is-active plumber-evolution-mapper")
+      service_status <- capture.output(droplet_ssh(droplet, "sudo systemctl is-active plumber-evolution-mapper"))
+      service_status <- paste(service_status, collapse = " ")
       if (!grepl("active", service_status)) {
         # Get detailed status for debugging
-        detailed_status <- droplet_ssh(droplet, "sudo systemctl status plumber-evolution-mapper --no-pager")
+        detailed_status <- capture.output(droplet_ssh(droplet, "sudo systemctl status plumber-evolution-mapper --no-pager"))
+        detailed_status <- paste(detailed_status, collapse = " ")
         stop("Service is not active. Status: ", service_status, "\nDetailed status: ", detailed_status)
       }
       
@@ -770,12 +965,12 @@ WantedBy=multi-user.target
     }
     
     # Verify deployment with strict error handling
-    cat("Performing deployment verification...\n")
+    prov_log_info("Performing deployment verification...")
     tryCatch({
       if (!verify_deployment(droplet)) {
         stop("Deployment verification failed - API is not responding correctly")
       }
-      cat("✅ Deployment verification passed\n")
+      prov_log_success("Deployment verification passed")
     }, error = function(e) {
       stop("❌ Deployment verification failed: ", e$message)
     })
@@ -817,8 +1012,8 @@ WantedBy=multi-user.target
     cat("\n✅ Provisioning completed successfully!\n")
     
   }, error = function(e) {
-    cat("❌ Error during provisioning:", e$message, "\n")
-    cat("Check the logs above for details\n")
+    prov_log_error("Error during provisioning:", e$message)
+    prov_log_error("Check the logs above for details")
     return(FALSE)
   })
 }
