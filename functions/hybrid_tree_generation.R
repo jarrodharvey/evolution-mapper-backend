@@ -414,6 +414,37 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
             # Store dropped species information for final response
             dropped_common_names <- recovery_result$dropped_common_names
             dropped_scientific_names <- recovery_result$dropped_scientific_names
+            
+            # CRITICAL FIX: Recalculate DateLife scientific names after recovery
+            # This ensures the DateLife query uses the same species as the recovered ROTL tree
+            api_log_info(paste("[", request_id, "] Recalculating DateLife species list after recovery"))
+            
+            # Create updated species_data matching the recovered valid_species
+            recovered_species_data <- species_data[species_data$scientific %in% valid_species$scientific, ]
+            
+            # Recalculate DateLife scientific names with the recovered species
+            datelife_scientific_names <- get_datelife_scientific_names(recovered_species_data, request_id)
+            cleaned_datelife_names <- clean_scientific_names(datelife_scientific_names)
+            
+            api_log_info(paste("[", request_id, "] Updated DateLife species count:", length(cleaned_datelife_names)))
+            
+            # Re-run DateLife query with updated species list
+            api_log_info(paste("[", request_id, "] Re-running DateLife query with recovered species list..."))
+            datelife_start <- Sys.time()
+            datelife_result_wrapper <- tryCatch({
+              datelife_result <- get_datelife_result(input = cleaned_datelife_names, get_spp_from_taxon = FALSE, reference_taxonomy = 'opentree')
+              list(success = TRUE, result = datelife_result, task = "datelife")
+            }, error = function(e) {
+              list(success = FALSE, error = e$message, task = "datelife", result = list())
+            })
+            datelife_duration <- as.numeric(difftime(Sys.time(), datelife_start, units = "secs"))
+            
+            if (datelife_result_wrapper$success) {
+              api_log_info(paste("[", request_id, "] Updated DateLife query completed - Duration:", round(datelife_duration, 3), "s"))
+              api_log_info(paste("[", request_id, "] Found", length(datelife_result_wrapper$result), "chronograms"))
+            } else {
+              api_log_error(paste("[", request_id, "] Updated DateLife query failed - Duration:", round(datelife_duration, 3), "s -", datelife_result_wrapper$error))
+            }
           } else {
             api_log_error(paste("[", request_id, "] ROTL retry failed even after TNRS recovery:", retry_result$error))
             return(list(
@@ -573,10 +604,11 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
     species_without_ages_scientific <- c()
     species_without_ages_common <- c()
     
-    # Check each input species to see if it has age data
-    for (i in seq_along(scientific_names)) {
-      sci_name <- scientific_names[i]
-      common_name <- common_names[i]
+    # Check each species that made it into the final tree to see if it has age data
+    # Use valid_species (post-recovery) instead of original input to avoid counting dropped species
+    for (i in seq_along(valid_species$scientific)) {
+      sci_name <- valid_species$scientific[i]
+      common_name <- valid_species$common[i]
       
       # Check if this species is in DateLife (normalize both formats for comparison)
       has_datelife_data <- sci_name %in% datelife_species_normalized || 
@@ -588,13 +620,21 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
       }
     }
     
-    species_with_ages <- length(scientific_names) - length(species_without_ages_scientific)
+    # Calculate coverage based on species that actually made it into the tree
+    final_species_count <- nrow(valid_species)
+    species_with_ages <- final_species_count - length(species_without_ages_scientific)
     coverage_type <- if (length(species_without_ages_scientific) == 0) "complete" else "partial"
     
     api_log_info(paste("[", request_id, "] Age coverage analysis complete:", sep=""))
-    api_log_info(paste("[", request_id, "]   Species with ages:", species_with_ages, "/", length(scientific_names)))
+    api_log_info(paste("[", request_id, "]   Final tree species count:", final_species_count))
+    api_log_info(paste("[", request_id, "]   Species with ages:", species_with_ages, "/", final_species_count))
     api_log_info(paste("[", request_id, "]   Species without ages:", length(species_without_ages_scientific)))
     api_log_info(paste("[", request_id, "]   Coverage type:", coverage_type))
+    
+    # Also report dropped species for transparency
+    if (length(dropped_common_names) > 0) {
+      api_log_info(paste("[", request_id, "]   Dropped during recovery:", paste(head(dropped_common_names, 3), collapse = ', '), if(length(dropped_common_names) > 3) '...' else '', sep=" "))
+    }
     
     if (length(species_without_ages_common) > 0) {
       api_log_info(paste("[", request_id, "]   Species missing age data:", paste(head(species_without_ages_common, 3), collapse = ', '), if(length(species_without_ages_common) > 3) '...' else '', sep=" "))
