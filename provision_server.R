@@ -525,13 +525,8 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
       # Get the appropriate CRAN repository suffix
       cran_suffix <- cran_repo_map[[ubuntu_version]]
       if (is.null(cran_suffix)) {
-        prov_log_warn("Ubuntu version", ubuntu_version, "not directly supported by CRAN, using standard Ubuntu repositories")
-        # Use standard Ubuntu repositories
-        upgrade_result <- capture.output(droplet_ssh(droplet, "sudo apt install -y r-base r-base-dev && echo 'SUCCESS' || echo 'FAILED'"))
-        upgrade_result <- paste(upgrade_result, collapse = " ")
-        if (!grepl("SUCCESS", upgrade_result)) {
-          stop("Failed to install R from standard Ubuntu repositories")
-        }
+        prov_log_error("Ubuntu version", ubuntu_version, "not supported by CRAN - refusing to use potentially outdated Ubuntu repositories")
+        stop("Unsupported Ubuntu version for CRAN R installation: ", ubuntu_version)
       } else {
         prov_log_info("Using CRAN repository suffix:", cran_suffix)
         
@@ -558,16 +553,8 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
         upgrade_result <- capture.output(droplet_ssh(droplet, "sudo apt install -y r-base r-base-dev && echo 'SUCCESS' || echo 'FAILED'"))
         upgrade_result <- paste(upgrade_result, collapse = " ")
         if (!grepl("SUCCESS", upgrade_result)) {
-          prov_log_warn("CRAN installation failed, falling back to standard Ubuntu repositories")
-          # Remove CRAN repository and try standard repos
-          droplet_ssh(droplet, "sudo rm -f /etc/apt/sources.list.d/cran-r.list")
-          droplet_ssh(droplet, "sudo apt update")
-          
-          upgrade_result2 <- capture.output(droplet_ssh(droplet, "sudo apt install -y r-base r-base-dev && echo 'SUCCESS' || echo 'FAILED'"))
-          upgrade_result2 <- paste(upgrade_result2, collapse = " ")
-          if (!grepl("SUCCESS", upgrade_result2)) {
-            stop("Failed to install R from both CRAN and standard repositories")
-          }
+          prov_log_error("CRAN R installation failed - refusing to fall back to potentially outdated Ubuntu repositories")
+          stop("Failed to install current R version from CRAN repository")
         }
       }
       
