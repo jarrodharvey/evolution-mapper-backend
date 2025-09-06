@@ -62,6 +62,7 @@ format_openapi_docs() {
 generate_testing_commands() {
     local json_data="$1"
     local api_key="$2"
+    local base_url="$3"
     
     echo "TESTING COMMANDS"
     echo "================"
@@ -127,19 +128,63 @@ generate_testing_commands() {
         esac
         
         # Complete the curl command
-        curl_cmd="$curl_cmd \"http://localhost:8000$endpoint$query_params\" | jq"
+        curl_cmd="$curl_cmd \"$base_url$endpoint$query_params\" | jq"
         
         echo "$curl_cmd"
         echo
     done
 }
 
-# Source .Renviron to get API keys
+# Parse command line arguments
+BASE_URL="http://localhost:8000"
+USE_DROPLET_IP=false
+USE_DOMAIN=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --droplet-ip)
+            USE_DROPLET_IP=true
+            shift
+            ;;
+        --domain)
+            USE_DOMAIN=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [--droplet-ip|--domain]"
+            echo "  --droplet-ip  Use DO_DROPLET_IP from .Renviron"
+            echo "  --domain      Use DO_DROPLET_DOMAIN from .Renviron"
+            exit 1
+            ;;
+    esac
+done
+
+# Source .Renviron to get API keys and server info
 if [ -f ".Renviron" ]; then
     export $(grep -v '^#' .Renviron | xargs)
 else
     echo "Error: .Renviron file not found"
     exit 1
+fi
+
+# Set base URL based on flags
+if [ "$USE_DROPLET_IP" = true ]; then
+    if [ -z "$DO_DROPLET_IP" ]; then
+        echo "Error: DO_DROPLET_IP not found in .Renviron"
+        exit 1
+    fi
+    BASE_URL="http://$DO_DROPLET_IP:8000"
+    echo "Using DigitalOcean droplet IP: $DO_DROPLET_IP"
+elif [ "$USE_DOMAIN" = true ]; then
+    if [ -z "$DO_DROPLET_DOMAIN" ]; then
+        echo "Error: DO_DROPLET_DOMAIN not found in .Renviron"
+        exit 1
+    fi
+    BASE_URL="https://$DO_DROPLET_DOMAIN"
+    echo "Using DigitalOcean domain: $DO_DROPLET_DOMAIN"
+else
+    echo "Using localhost: http://localhost:8000"
 fi
 
 # Get first API key from comma-separated list
@@ -151,15 +196,16 @@ if [ -z "$API_KEY" ]; then
 fi
 
 # Check if server is running
-if ! curl -s --connect-timeout 5 "http://localhost:8000/api/health" > /dev/null; then
-    echo "Error: Server at http://localhost:8000 is not responding"
-    echo "Make sure the Plumber server is running on port 8000"
+echo "Checking server availability at $BASE_URL..."
+if ! curl -s --connect-timeout 5 "$BASE_URL/api/health" > /dev/null; then
+    echo "Error: Server at $BASE_URL is not responding"
+    echo "Make sure the server is running and accessible"
     exit 1
 fi
 
 # Fetch OpenAPI specification and format it
 echo "Fetching OpenAPI specification from server..."
-OPENAPI_JSON=$(curl -s -H "X-API-Key: $API_KEY" "http://localhost:8000/openapi.json")
+OPENAPI_JSON=$(curl -s -H "X-API-Key: $API_KEY" "$BASE_URL/openapi.json")
 
 if [[ $? -eq 0 && "$OPENAPI_JSON" != "" ]]; then
     format_openapi_docs "$OPENAPI_JSON"
@@ -185,4 +231,4 @@ else
 fi
 
 echo
-generate_testing_commands "$OPENAPI_JSON" "$API_KEY"
+generate_testing_commands "$OPENAPI_JSON" "$API_KEY" "$BASE_URL"

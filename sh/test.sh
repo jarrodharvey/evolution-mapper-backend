@@ -17,9 +17,64 @@ pkill -f "tail -f logs/api.log" 2>/dev/null || true
 #   --progress: Use progress tracking instead of log streaming
 #   --expansion-speed=N: Set tree expansion speed in milliseconds (default 750)
 
-# Get API key from .Renviron file
+# Parse command line arguments
+USE_SIMPLE=false
+USE_PROGRESS=false
+USE_DROPLET_IP=false
+USE_DOMAIN=false
+COUNT=""
+OUTPUT_FILE=""
+EXPANSION_SPEED=""
+BASE_URL="http://localhost:8000"
+
+# Parse arguments
+for arg in "$@"; do
+    case $arg in
+        --simple)
+            USE_SIMPLE=true
+            ;;
+        --progress)
+            USE_PROGRESS=true
+            ;;
+        --droplet-ip)
+            USE_DROPLET_IP=true
+            ;;
+        --domain)
+            USE_DOMAIN=true
+            ;;
+        --expansion-speed=*)
+            EXPANSION_SPEED="${arg#*=}"
+            ;;
+        --help)
+            echo "Usage: $0 [OPTIONS] [count] [output_file]"
+            echo ""
+            echo "Options:"
+            echo "  --simple              Use predefined simple species set"
+            echo "  --progress            Use progress tracking instead of log streaming"
+            echo "  --droplet-ip          Use DO_DROPLET_IP from .Renviron"
+            echo "  --domain              Use DO_DROPLET_DOMAIN from .Renviron"
+            echo "  --expansion-speed=N   Set tree expansion speed in milliseconds"
+            echo "  --help                Show this help message"
+            echo ""
+            echo "Arguments:"
+            echo "  count                 Number of species (3-20, default random 4-12)"
+            echo "  output_file           Output HTML file (default sh/random_hybrid_tree.html)"
+            exit 0
+            ;;
+        *)
+            if [[ -z "$COUNT" && "$arg" =~ ^[0-9]+$ ]]; then
+                COUNT=$arg
+            elif [[ -z "$OUTPUT_FILE" ]]; then
+                OUTPUT_FILE=$arg
+            fi
+            ;;
+    esac
+done
+
+# Source .Renviron to get environment variables
 if [[ -f ".Renviron" ]]; then
-    API_KEY=$(grep "^EVOLUTION_API_KEYS=" .Renviron | cut -d'=' -f2 | cut -d',' -f1)
+    export $(grep -v '^#' .Renviron | xargs)
+    API_KEY=$(echo "$EVOLUTION_API_KEYS" | cut -d',' -f1)
     if [[ -z "$API_KEY" ]]; then
         echo "Error: No API key found in .Renviron file" >&2
         echo "Please set EVOLUTION_API_KEYS in .Renviron (see .Renviron.example)" >&2
@@ -31,34 +86,25 @@ else
     exit 1
 fi
 
-# Parse command line arguments
-USE_SIMPLE=false
-USE_PROGRESS=false
-COUNT=""
-OUTPUT_FILE=""
-EXPANSION_SPEED=""
-
-# Parse arguments
-for arg in "$@"; do
-    case $arg in
-        --simple)
-            USE_SIMPLE=true
-            ;;
-        --progress)
-            USE_PROGRESS=true
-            ;;
-        --expansion-speed=*)
-            EXPANSION_SPEED="${arg#*=}"
-            ;;
-        *)
-            if [[ -z "$COUNT" && "$arg" =~ ^[0-9]+$ ]]; then
-                COUNT=$arg
-            elif [[ -z "$OUTPUT_FILE" ]]; then
-                OUTPUT_FILE=$arg
-            fi
-            ;;
-    esac
-done
+# Set base URL based on flags
+if [[ "$USE_DROPLET_IP" == true ]]; then
+    if [[ -z "$DO_DROPLET_IP" ]]; then
+        echo "Error: DO_DROPLET_IP not found in .Renviron" >&2
+        exit 1
+    fi
+    BASE_URL="http://$DO_DROPLET_IP:8000"
+    echo "Using DigitalOcean droplet IP: $DO_DROPLET_IP"
+elif [[ "$USE_DOMAIN" == true ]]; then
+    if [[ -z "$DO_DROPLET_DOMAIN" ]]; then
+        echo "Error: DO_DROPLET_DOMAIN not found in .Renviron" >&2
+        exit 1
+    fi
+    BASE_URL="https://$DO_DROPLET_DOMAIN"
+    echo "Using DigitalOcean domain: $DO_DROPLET_DOMAIN"
+else
+    BASE_URL="http://localhost:8000"
+    echo "Using localhost: http://localhost:8000"
+fi
 
 # Set defaults
 if [[ "$USE_SIMPLE" == true ]]; then
@@ -100,8 +146,8 @@ fi
 # Check if server is running
 echo ""
 echo "🔍 Checking server status..."
-if curl -s --connect-timeout 5 --max-time 10 "http://localhost:8000/api/health" > /dev/null 2>&1; then
-    SERVER_STATUS=$(curl -s --connect-timeout 5 --max-time 10 "http://localhost:8000/api/health" | jq -r '.status[0] // .status // "unknown"' 2>/dev/null)
+if curl -s --connect-timeout 5 --max-time 10 "$BASE_URL/api/health" > /dev/null 2>&1; then
+    SERVER_STATUS=$(curl -s --connect-timeout 5 --max-time 10 "$BASE_URL/api/health" | jq -r '.status[0] // .status // "unknown"' 2>/dev/null)
     if [[ "$SERVER_STATUS" == "ok" ]]; then
         echo "✅ Server is running and healthy"
     else
@@ -110,13 +156,17 @@ if curl -s --connect-timeout 5 --max-time 10 "http://localhost:8000/api/health" 
         exit 1
     fi
 else
-    echo "❌ Server is not responding on http://localhost:8000"
+    echo "❌ Server is not responding on $BASE_URL"
     echo ""
-    echo "💡 To start the server, run:"
-    echo "   R --no-restore --no-save -e \"library(plumber); pr <- plumb('plumber.R'); pr\\\$run(port = 8000, host = '127.0.0.1')\""
-    echo ""
-    echo "   Or use the background version:"
-    echo "   R --no-restore --no-save -e \"library(plumber); pr <- plumb('plumber.R'); pr\\\$run(port = 8000, host = '127.0.0.1')\" &"
+    if [[ "$BASE_URL" == "http://localhost:8000" ]]; then
+        echo "💡 To start the server, run:"
+        echo "   R --no-restore --no-save -e \"library(plumber); pr <- plumb('plumber.R'); pr\\\$run(port = 8000, host = '127.0.0.1')\""
+        echo ""
+        echo "   Or use the background version:"
+        echo "   R --no-restore --no-save -e \"library(plumber); pr <- plumb('plumber.R'); pr\\\$run(port = 8000, host = '127.0.0.1')\" &"
+    else
+        echo "💡 Make sure the server is running and accessible at $BASE_URL"
+    fi
     exit 1
 fi
 
@@ -126,7 +176,7 @@ if [[ "$USE_PROGRESS" == true ]]; then
     echo ""
     echo "🎯 Getting progress token for real-time monitoring..."
     
-    PROGRESS_RESPONSE=$(curl -s -H "X-API-Key: $API_KEY" "http://localhost:8000/api/get_progress_token")
+    PROGRESS_RESPONSE=$(curl -s -H "X-API-Key: $API_KEY" "$BASE_URL/api/get_progress_token")
     
     if echo "$PROGRESS_RESPONSE" | jq -r '.success' | grep -q "true"; then
         PROGRESS_TOKEN=$(echo "$PROGRESS_RESPONSE" | jq -r 'if (.token | type) == "array" then .token[0] else .token end')
@@ -248,7 +298,7 @@ fi
     -H "X-API-Key: $API_KEY" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     -d "$API_DATA" \
-    "http://localhost:8000/api/full-tree-dated" > "$TEMP_RESPONSE") &
+    "$BASE_URL/api/full-tree-dated" > "$TEMP_RESPONSE") &
 
 CURL_PID=$!
 
@@ -261,7 +311,7 @@ if [[ "$USE_PROGRESS" == true ]]; then
     # Progress monitoring loop that exits when complete (now works thanks to multithreading!)
     (while true; do
         echo "=== Latest Progress Step $(date '+%H:%M:%S') ==="
-        RESPONSE=$(curl -s -H "X-API-Key: $API_KEY" "http://localhost:8000/api/progress?progress_token=$PROGRESS_TOKEN")
+        RESPONSE=$(curl -s -H "X-API-Key: $API_KEY" "$BASE_URL/api/progress?progress_token=$PROGRESS_TOKEN")
         
         if [[ -n "$RESPONSE" ]] && echo "$RESPONSE" | jq -e '.steps' > /dev/null 2>&1; then
             if echo "$RESPONSE" | jq -e '.steps | length > 0' > /dev/null 2>&1; then
@@ -286,25 +336,57 @@ if [[ "$USE_PROGRESS" == true ]]; then
     WATCH_PID=$!
 else
     # Stream server logs while waiting with color coding
-    (tail -f logs/api.log | while IFS= read -r line; do
-        # Color coding for different log levels and patterns
-        if [[ "$line" =~ ERROR|Error|error ]]; then
-            echo -e "\033[31m$line\033[0m"  # Red for errors
-        elif [[ "$line" =~ WARN|Warning|warning ]]; then
-            echo -e "\033[33m$line\033[0m"  # Yellow for warnings
-        elif [[ "$line" =~ INFO|Info|info|Starting|Finished|Success|Complete ]]; then
-            echo -e "\033[32m$line\033[0m"  # Green for info/success
-        elif [[ "$line" =~ DEBUG|Debug|debug ]]; then
-            echo -e "\033[36m$line\033[0m"  # Cyan for debug
-        elif [[ "$line" =~ "API call"|"Endpoint"|"Request"|"Response" ]]; then
-            echo -e "\033[35m$line\033[0m"  # Magenta for API-related
-        elif [[ "$line" =~ "DateLife"|"ROTL"|"Wikipedia"|"PhyloPic" ]]; then
-            echo -e "\033[34m$line\033[0m"  # Blue for external services
+    if [[ "$USE_DROPLET_IP" == true || "$USE_DOMAIN" == true ]]; then
+        # Remote log streaming via SSH
+        if [[ "$USE_DROPLET_IP" == true ]]; then
+            LOG_HOST="root@$DO_DROPLET_IP"
+            echo "📡 Streaming remote logs via SSH from $DO_DROPLET_IP..."
         else
-            echo "$line"  # Default color for other lines
+            LOG_HOST="root@$DO_DROPLET_IP"  # Still use IP for SSH even with domain flag
+            echo "📡 Streaming remote logs via SSH from $DO_DROPLET_IP (domain: $DO_DROPLET_DOMAIN)..."
         fi
-    done) &
-    TAIL_PID=$!
+        
+        (ssh "$LOG_HOST" "tail -f /var/plumber/evolution-mapper/logs/api.log" | while IFS= read -r line; do
+            # Color coding for different log levels and patterns
+            if [[ "$line" =~ ERROR|Error|error ]]; then
+                echo -e "\033[31m$line\033[0m"  # Red for errors
+            elif [[ "$line" =~ WARN|Warning|warning ]]; then
+                echo -e "\033[33m$line\033[0m"  # Yellow for warnings
+            elif [[ "$line" =~ INFO|Info|info|Starting|Finished|Success|Complete ]]; then
+                echo -e "\033[32m$line\033[0m"  # Green for info/success
+            elif [[ "$line" =~ DEBUG|Debug|debug ]]; then
+                echo -e "\033[36m$line\033[0m"  # Cyan for debug
+            elif [[ "$line" =~ "API call"|"Endpoint"|"Request"|"Response" ]]; then
+                echo -e "\033[35m$line\033[0m"  # Magenta for API-related
+            elif [[ "$line" =~ "DateLife"|"ROTL"|"Wikipedia"|"PhyloPic" ]]; then
+                echo -e "\033[34m$line\033[0m"  # Blue for external services
+            else
+                echo "$line"  # Default color for other lines
+            fi
+        done) &
+        TAIL_PID=$!
+    else
+        # Local log streaming
+        (tail -f logs/api.log | while IFS= read -r line; do
+            # Color coding for different log levels and patterns
+            if [[ "$line" =~ ERROR|Error|error ]]; then
+                echo -e "\033[31m$line\033[0m"  # Red for errors
+            elif [[ "$line" =~ WARN|Warning|warning ]]; then
+                echo -e "\033[33m$line\033[0m"  # Yellow for warnings
+            elif [[ "$line" =~ INFO|Info|info|Starting|Finished|Success|Complete ]]; then
+                echo -e "\033[32m$line\033[0m"  # Green for info/success
+            elif [[ "$line" =~ DEBUG|Debug|debug ]]; then
+                echo -e "\033[36m$line\033[0m"  # Cyan for debug
+            elif [[ "$line" =~ "API call"|"Endpoint"|"Request"|"Response" ]]; then
+                echo -e "\033[35m$line\033[0m"  # Magenta for API-related
+            elif [[ "$line" =~ "DateLife"|"ROTL"|"Wikipedia"|"PhyloPic" ]]; then
+                echo -e "\033[34m$line\033[0m"  # Blue for external services
+            else
+                echo "$line"  # Default color for other lines
+            fi
+        done) &
+        TAIL_PID=$!
+    fi
 fi
 
 # Wait for curl to complete
@@ -391,13 +473,13 @@ if echo "$HYBRID_RESPONSE" | jq -r '.success' | grep -q "true"; then
         echo "curl -X POST -H \"X-API-Key: $API_KEY\" \\"
         echo "  -H \"Content-Type: application/x-www-form-urlencoded\" \\"
         echo "  -d \"common_names=$COMMON_LIST&scientific_names=$SCIENTIFIC_LIST\" \\"
-        echo "  \"http://localhost:8000/api/tree\" | jq -r 'if (.html | type) == \"array\" then .html[0] else .html end' > sh/comparison_topology_tree.html && open sh/comparison_topology_tree.html"
+        echo "  \"$BASE_URL/api/tree\" | jq -r 'if (.html | type) == \"array\" then .html[0] else .html end' > sh/comparison_topology_tree.html && open sh/comparison_topology_tree.html"
         echo ""
         echo "📋 DateLife-only tree (/api/dated-tree) - save and open:"
         echo "curl -X POST -H \"X-API-Key: $API_KEY\" \\"
         echo "  -H \"Content-Type: application/x-www-form-urlencoded\" \\"
         echo "  -d \"common_names=$COMMON_LIST&scientific_names=$SCIENTIFIC_LIST&allow_partial_response=true\" \\"
-        echo "  \"http://localhost:8000/api/dated-tree\" | jq -r 'if (.html | type) == \"array\" then .html[0] else .html end' > sh/comparison_datelife_tree.html && open sh/comparison_datelife_tree.html"
+        echo "  \"$BASE_URL/api/dated-tree\" | jq -r 'if (.html | type) == \"array\" then .html[0] else .html end' > sh/comparison_datelife_tree.html && open sh/comparison_datelife_tree.html"
         echo ""
         echo "💡 These commands will:"
         echo "   • Extract HTML from JSON response"  
