@@ -177,6 +177,63 @@ create_chronos_calibrations <- function(rotl_tree, pairwise_ages, species_data, 
   return(calibration_points)
 }
 
+#' Create direct pairwise age mapping when chronos fails
+#' @param rotl_tree Phylo tree from ROTL (topology only) 
+#' @param pairwise_ages Named list of pairwise ages from extract_pairwise_ages_modern()
+#' @param calibrations Calibration points data frame from create_chronos_calibrations()
+#' @param species_data Data frame mapping common names to scientific names
+#' @param request_id Optional request ID for logging
+#' @return List with success status and node_ages or error
+create_direct_pairwise_mapping <- function(rotl_tree, pairwise_ages, calibrations, species_data, request_id = "direct_mapping") {
+  api_log_info(paste("[", request_id, "] Creating direct pairwise age mapping from", length(pairwise_ages), "pairwise ages"))
+  
+  tryCatch({
+    node_ages <- list()
+    
+    # Clean tip labels to match with calibrations
+    clean_tip_labels <- gsub("_ott\\d+", "", rotl_tree$tip.label)
+    clean_tip_labels <- gsub("_", " ", clean_tip_labels)
+    
+    # Use the calibration points to map ages directly to ROTL tree nodes
+    for (i in 1:nrow(calibrations)) {
+      calib <- calibrations[i, ]
+      species1 <- calib$species1
+      species2 <- calib$species2
+      
+      # Get the median age for this pair from pairwise_ages
+      pair_key <- calib$pair_key
+      if (pair_key %in% names(pairwise_ages)) {
+        age_info <- pairwise_ages[[pair_key]]
+        median_age <- age_info$median
+        
+        api_log_info(paste("[", request_id, "] Direct mapping:", species1, "—", species2, "=", round(median_age, 1), "Mya"))
+        
+        # Create the descendant key in DateLife format (with underscores and pipe separator)
+        species1_datelife <- gsub(" ", "_", species1)
+        species2_datelife <- gsub(" ", "_", species2)
+        desc_key <- paste(sort(c(species1_datelife, species2_datelife)), collapse = "|")
+        
+        # Store the age
+        node_ages[[desc_key]] <- median_age
+      }
+    }
+    
+    api_log_info(paste("[", request_id, "] Direct pairwise mapping completed - created", length(node_ages), "node ages"))
+    
+    return(list(
+      success = TRUE,
+      node_ages = node_ages,
+      calibrations_used = calibrations,
+      pairwise_ages_found = length(pairwise_ages),
+      method = "direct_pairwise_fallback"
+    ))
+    
+  }, error = function(e) {
+    api_log_error(paste("[", request_id, "] Direct pairwise mapping failed:", conditionMessage(e)))
+    return(list(success = FALSE, error = conditionMessage(e), method = "direct_pairwise_fallback"))
+  })
+}
+
 #' Generate dated tree using modern ape::chronos approach instead of summary_matrix_to_phylo
 #' @param rotl_tree Phylo tree from ROTL (topology only)
 #' @param datelife_results List of chronogram matrices from DateLife
@@ -319,6 +376,22 @@ generate_dated_tree_chronos <- function(rotl_tree, datelife_results, species_dat
     
   }, error = function(e) {
     api_log_error(paste("[", request_id, "] Modern chronos approach failed:", conditionMessage(e)))
+    
+    # Check if this is the "cannot find reasonable starting dates" error that we can work around
+    error_msg <- conditionMessage(e)
+    if (grepl("cannot find reasonable starting dates", error_msg) && exists("pairwise_ages") && exists("calibrations")) {
+      api_log_info(paste("[", request_id, "] Attempting direct pairwise age mapping fallback..."))
+      
+      # Try the direct pairwise mapping approach
+      fallback_result <- create_direct_pairwise_mapping(rotl_tree, pairwise_ages, calibrations, species_data, request_id)
+      
+      if (fallback_result$success) {
+        return(fallback_result)
+      } else {
+        api_log_warn(paste("[", request_id, "] Fallback also failed:", fallback_result$error))
+      }
+    }
+    
     return(list(success = FALSE, error = conditionMessage(e), method = "chronos"))
   })
 }

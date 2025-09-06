@@ -763,15 +763,63 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
       # Only ancestors whose descendants are ALL in DateLife should get ages
       total_descendants <- length(descendants)
       
-      if (length(datelife_descendants) >= 2 && length(datelife_descendants) == total_descendants) {
-        # All descendants of this ancestor are in DateLife - we can apply ages
-        desc_key <- paste(sort(datelife_descendants), collapse = "|")
-        
-        # Check if we have an exact match for this ancestor
-        if (desc_key %in% names(ancestor_ages)) {
-          ancestor_age_mya <- round(ancestor_ages[[desc_key]], 1)
-          return(list(info = paste0(ancestor_age_mya, " Mya"), has_age = TRUE))
+      # First check if we have age data for any subset of these descendants
+      # This allows partial coverage instead of requiring all descendants to be in DateLife
+      desc_key <- paste(sort(datelife_descendants), collapse = "|")
+      
+      # Check if we have an exact match for this ancestor
+      if (desc_key %in% names(ancestor_ages)) {
+        ancestor_age_mya <- round(ancestor_ages[[desc_key]], 1)
+        return(list(info = paste0(ancestor_age_mya, " Mya"), has_age = TRUE))
+      }
+      
+      # NEW: Check if any pairwise age represents the MRCA of exactly these descendants
+      # This handles cases like Theria where we have Elephas-Setonix pairwise data
+      # but the node also includes Homo as a descendant
+      # IMPORTANT: Only assign age if this node is the MRCA of the pairwise species
+      for (age_key in names(ancestor_ages)) {
+        age_descendants <- strsplit(age_key, "\\|")[[1]]
+        # Check if the pairwise descendants are ALL present in our node's descendants
+        # AND check that this is likely the MRCA by ensuring no child nodes contain all pairwise species
+        if (length(age_descendants) >= 2 && all(age_descendants %in% datelife_descendants)) {
+          # Additional check: verify this is the most specific node for these pairwise species
+          # by checking if any child nodes also contain all the pairwise species
+          is_most_specific <- TRUE
+          if (node_num > n_tips) {
+            # Get child nodes
+            edges_from_node <- which(phylo_tree$edge[,1] == node_num)
+            for (edge_idx in edges_from_node) {
+              child_node <- phylo_tree$edge[edge_idx, 2]
+              if (child_node > n_tips) {  # Only check internal nodes
+                child_subtree <- extract.clade(phylo_tree, child_node)
+                child_descendants <- child_subtree$tip.label
+                child_datelife_descendants <- c()
+                for (child_desc in child_descendants) {
+                  child_clean <- gsub("_ott\\d+", "", child_desc)
+                  child_clean <- gsub("_", " ", child_clean)
+                  child_datelife <- gsub(" ", "_", child_clean)
+                  if (child_datelife %in% datelife_species || child_clean %in% datelife_species) {
+                    child_datelife_descendants <- c(child_datelife_descendants, child_datelife)
+                  }
+                }
+                # If child node contains all pairwise species, then this is not the MRCA
+                if (all(age_descendants %in% child_datelife_descendants)) {
+                  is_most_specific <- FALSE
+                  break
+                }
+              }
+            }
+          }
+          
+          if (is_most_specific) {
+            ancestor_age_mya <- round(ancestor_ages[[age_key]], 1)
+            return(list(info = paste0(ancestor_age_mya, " Mya"), has_age = TRUE))
+          }
         }
+      }
+      
+      # Only apply the complete coverage restriction if we didn't find an exact match
+      if (length(datelife_descendants) >= 2 && length(datelife_descendants) == total_descendants) {
         
         # If no exact match, check for subset matches within DateLife data
         for (age_key in names(ancestor_ages)) {
