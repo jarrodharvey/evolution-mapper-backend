@@ -15,7 +15,7 @@ pr("plumber.R") %>% pr_run(port = 8000)
 **R Packages:**
 ```r
 install.packages(c("plumber", "rlang", "rotl", "ape", "collapsibleTree", 
-                   "htmlwidgets", "RSQLite", "DBI", "dplyr", "datelife", "httr"))
+                   "htmlwidgets", "RSQLite", "DBI", "dplyr", "datelife", "httr", "logger"))
 ```
 
 **System Dependencies (for production):**
@@ -35,6 +35,9 @@ curl http://localhost:8000/api/health
 
 # Search species with API key in header
 curl -H "X-API-Key: YOUR-API-KEY" "http://localhost:8000/api/species?search=whale&limit=7"
+
+# Generate hybrid tree (RECOMMENDED - combines ROTL topology + DateLife ages)
+curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis catus" http://localhost:8000/api/full-tree-dated
 
 # Generate topology-only tree (requires both common and scientific names)
 curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis catus" http://localhost:8000/api/tree
@@ -56,6 +59,9 @@ curl -H "X-API-Key: YOUR-API-KEY" "http://localhost:8000/api/wikipedia_truncated
 
 # Get Wikipedia info with custom truncation length
 curl -H "X-API-Key: YOUR-API-KEY" "http://localhost:8000/api/wikipedia_truncated_intro?taxonomic_group=Primates&truncate_length=200"
+
+# Get citations for data sources
+curl -H "X-API-Key: YOUR-API-KEY" "http://localhost:8000/api/citations"
 ```
 
 ### API Key Configuration
@@ -141,7 +147,11 @@ lsof -ti:8000 | xargs kill -9
 - **functions/progress_tracking.R**: Progress tracking for long-running operations
 - **functions/parallel_config.R**: Parallel processing configuration
 - **functions/caching_config.R**: Caching configuration for external API calls
+- **functions/cached_api_functions.R**: Cached implementations of external API calls
+- **functions/datelife_efficiency.R**: Optimized DateLife operations
+- **functions/modern_age_mapping.R**: Age mapping and geological period utilities
 - **data/species.sqlite**: Species database (90,276+ records with OTT IDs, common names, scientific names)
+- **logs/**: Log file directory for API operations
 
 ### API Features Overview
 - **Topology Trees**: Fast generation using common names, works for any species combination
@@ -417,3 +427,18 @@ source("tests/parallel_side_effects_investigation.R")  # Parallel processing tes
 - API keys stored in `.Renviron` (excluded from git)
 - Use `.Renviron.example` as template for setup
 - Example keys in documentation (like `your-dev-key-123`) are invalid and will not work
+
+### Environment Configuration
+The `.Renviron` file contains several important configuration options:
+- `EVOLUTION_API_KEYS`: Comma-separated list of valid API keys
+- `CORS_ALLOWED_ORIGINS`: Allowed origins for CORS (development and production URLs)
+- `DO_PAT`: DigitalOcean API token for server provisioning
+- `DO_DROPLET_IP`: Production server IP address
+- `DO_DROPLET_DOMAIN`: Optional domain for HTTPS setup
+
+### Development Best Practices
+- **Restart Required**: Always restart the R server after making code changes
+- **Port Management**: Use `lsof -ti:8000 | xargs kill -9` to kill processes on port 8000
+- **Logging**: Use `api_log_info()`, `api_log_warn()`, `api_log_error()` functions instead of `cat()`
+- **Test Organization**: Save all test files to `tests/` directory, never to root
+- **API Key Security**: Real API keys are in `.Renviron`, example keys in docs will not work

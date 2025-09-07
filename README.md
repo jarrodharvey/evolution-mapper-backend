@@ -5,9 +5,12 @@ A phylogenetic tree generation API built with R Plumber, providing interactive C
 ## Features
 
 - **Species Database**: 90,276+ unique species with Open Tree of Life IDs
-- **Dual Tree Types**: Topology-only trees (fast, any species) and dated trees (chronogram ages, limited coverage)
-- **Consistent Input Format**: Both APIs require paired common and scientific names for accurate species matching
-- **Interactive Trees**: Color-coded CollapsibleTree HTML visualizations with age tooltips
+- **Triple Tree Types**: Topology-only trees (fast, any species), dated trees (chronogram ages, limited coverage), and hybrid trees (ROTL topology + DateLife ages where available)
+- **Consistent Input Format**: All APIs require paired common and scientific names for accurate species matching
+- **Interactive Trees**: Color-coded CollapsibleTree HTML visualizations with mobile-friendly info panels
+- **Mobile-First Design**: Info panel system replaces hover tooltips for mobile compatibility
+- **Wikipedia Integration**: Contextual information about ancestral taxonomic groups
+- **PhyloPic Silhouettes**: Species silhouette images where available
 - **REST API**: Clean endpoints for integration with any frontend
 - **API Key Authentication**: Secure access control for all endpoints
 - **Rate Limiting**: 60 requests per minute per IP address
@@ -42,6 +45,15 @@ Body: common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis
 ```
 Returns interactive CollapsibleTree HTML with topology only (no ages). **Requires both common and scientific names** for accurate species matching and consistent visualization labels.
 
+### Generate Hybrid Phylogenetic Tree (RECOMMENDED)
+```
+POST /api/full-tree-dated
+Headers: X-API-Key: your-api-key
+Content-Type: application/x-www-form-urlencoded
+Body: common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis catus
+```
+Returns hybrid tree combining ROTL topology (complete coverage) with DateLife age data where available. **Always generates complete trees** - no fallback needed. Features mobile-friendly info panels with Wikipedia content and PhyloPic silhouettes.
+
 ### Generate Dated Phylogenetic Tree
 ```
 POST /api/dated-tree
@@ -51,7 +63,7 @@ Body: common_names=Human,Dog&scientific_names=Homo sapiens,Canis lupus
 ```
 Returns age-calibrated tree using DateLife chronogram database. **Requires both common and scientific names** - uses scientific names for chronogram lookup while preserving user-provided common names in visualization.
 
-**Coverage Limitations**: DateLife has extremely limited species coverage. Most species return no chronogram data. Frontend should attempt this endpoint first, then fall back to `/api/tree` if partial/no coverage.
+**Coverage Limitations**: DateLife has extremely limited species coverage. Most species return no chronogram data. Recommend using `/api/full-tree-dated` instead for guaranteed complete trees.
 
 **Partial Response Mode**:
 ```
@@ -66,12 +78,35 @@ Headers: X-API-Key: your-api-key
 ```
 Generates tree with random species for testing.
 
+### Wikipedia Information
+```
+GET /api/wikipedia_truncated_intro?taxonomic_group=Mammalia&truncate_length=300
+Headers: X-API-Key: your-api-key
+```
+Returns Wikipedia article introductions for taxonomic groups. Parameters:
+- `taxonomic_group` (required): Name of taxonomic group
+- `truncate_length` (optional): Max characters (50-1000, default 300)
+
+### Citations
+```
+GET /api/citations
+Headers: X-API-Key: your-api-key
+```
+Returns citation information for data sources (Open Tree of Life, DateLife, Wikipedia, PhyloPic).
+
 ### Legend Information
 ```
 GET /api/legend
 Headers: X-API-Key: your-api-key
 ```
 Returns color coding information for tree visualization nodes.
+
+### Debug Tree (Development)
+```
+GET /api/debug-tree?count=3
+Headers: X-API-Key: your-api-key
+```
+Debug endpoint for tree generation testing.
 
 ## Input Format
 
@@ -98,13 +133,25 @@ curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/species?search=wh
 
 ```
 backend/
-├── plumber.R                        # Main API server
+├── plumber.R                        # Main API server with CORS and authentication
 ├── functions/
 │   ├── rotl_tree_generation.R       # Topology-only trees (Open Tree of Life)
 │   ├── datelife_tree_generation.R   # Dated trees (DateLife chronograms)
+│   ├── hybrid_tree_generation.R     # Hybrid trees (ROTL + DateLife)
+│   ├── info_panel_system.R          # Mobile-friendly info panels
+│   ├── tree_html_enhancement.R      # Advanced tree visualization
+│   ├── wikipedia_api.R              # Wikipedia integration
+│   ├── phylopic_silhouettes.R       # PhyloPic integration
+│   ├── color_config.R               # Centralized color schemes
+│   ├── logging_config.R             # Centralized logging
+│   ├── progress_tracking.R          # Progress tracking for long operations
+│   ├── parallel_config.R            # Parallel processing configuration
+│   ├── caching_config.R             # Caching for external APIs
 │   └── tree_generation.R            # Legacy tree generation logic
 ├── data/
 │   └── species.sqlite               # Species database (90k+ records)
+├── logs/                            # Log files
+├── tests/                           # Test scripts and files
 ├── provision_server.R               # Automated DigitalOcean deployment
 ├── .Renviron.example                # Environment configuration template
 └── README.md
@@ -122,6 +169,8 @@ Required R packages:
 - `htmlwidgets` - Widget framework
 - `RSQLite`, `DBI` - Database access
 - `dplyr` - Data manipulation
+- `httr` - HTTP client for Wikipedia and PhyloPic APIs
+- `logger` - Centralized logging system
 
 ## Local Development
 
@@ -179,7 +228,7 @@ This ensures R curl uses the same SSL libraries as system curl, fixing compatibi
 ```r
 # Install dependencies
 install.packages(c("plumber", "rlang", "rotl", "ape", "collapsibleTree", 
-                   "htmlwidgets", "RSQLite", "DBI", "dplyr", "datelife"))
+                   "htmlwidgets", "RSQLite", "DBI", "dplyr", "datelife", "httr", "logger"))
 
 # Run API server
 library(plumber)
@@ -250,7 +299,10 @@ curl "http://DROPLET_ADDRESS:8000/api/health"
 # Search species
 curl -H "X-API-Key: demo-key-12345" "http://DROPLET_ADDRESS:8000/api/species?search=human&limit=3"
 
-# Generate tree (paired names required)
+# Generate hybrid tree (recommended)
+curl -X POST -H "X-API-Key: demo-key-12345" -d "common_names=Human,Dog&scientific_names=Homo sapiens,Canis lupus" "http://DROPLET_ADDRESS:8000/api/full-tree-dated"
+
+# Generate topology tree (fast, no ages)
 curl -X POST -H "X-API-Key: demo-key-12345" -d "common_names=Human,Dog&scientific_names=Homo sapiens,Canis lupus" "http://DROPLET_ADDRESS:8000/api/tree"
 ```
 
@@ -260,7 +312,29 @@ Alternative deployment options include `plumberDeploy` or Docker containerizatio
 
 ## Color Coding
 
-- **Red**: Root node ("Common ancestor - click me!")
-- **Blue**: Unnamed evolutionary ancestors  
-- **Orange**: Named taxonomic groups
-- **Green**: Species (leaf nodes)
+- **Deep Purple (#8E44AD)**: Root node ("Common ancestor - click me!")
+- **Blue (#3498DB)**: Unnamed evolutionary ancestors  
+- **Orange (#F39C12)**: Named taxonomic groups
+- **Green (#27AE60)**: Species (leaf nodes)
+
+## Recent Major Features
+
+### Hybrid Tree System (Latest)
+The `/api/full-tree-dated` endpoint provides the best of both worlds:
+- **Complete Coverage**: Always generates full trees using ROTL topology
+- **Age Information**: Incorporates DateLife chronogram data where available
+- **Mobile-First**: Info panel system replaces hover tooltips
+- **Rich Content**: Wikipedia content and PhyloPic silhouettes
+- **No Fallback Needed**: Unlike pure DateLife approach, always succeeds
+
+### Performance Optimizations
+- **Parallel Processing**: Wikipedia and PhyloPic data fetched concurrently
+- **Intelligent Caching**: External API calls cached to reduce load times
+- **Progress Tracking**: Server-sent events for long-running operations
+- **Centralized Logging**: Structured logging with file and console output
+
+### Security & Production Ready
+- **API Key Authentication**: Secure access control
+- **Rate Limiting**: 60 requests per minute per IP
+- **Input Validation**: SQL injection protection
+- **Automated Deployment**: One-command DigitalOcean deployment
