@@ -603,3 +603,5 @@ else
     echo "$HYBRID_RESPONSE" | jq .
     exit 1
 fi
+
+pkill -f "tail -f logs/api.log" 2>/dev/null || true

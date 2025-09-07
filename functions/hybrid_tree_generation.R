@@ -490,6 +490,7 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
     datelife_phylo <- NULL
     datelife_species <- c()
     ancestor_ages <- list()
+    age_assignment_method <- "none"  # Default method when no age data available
     
     if (length(datelife_result) > 0) {
       api_log_info(paste("[", request_id, "] Processing", length(datelife_result), "DateLife chronograms..."))
@@ -526,6 +527,7 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
           
           # Use the ages from chronos result
           ancestor_ages <- chronos_result$node_ages
+          age_assignment_method <- chronos_result$method  # Track method: "chronos" or "direct_pairwise_fallback"
           
           # Get root age from the dated tree
           branching_times_tree <- branching.times(chronos_result$dated_tree)
@@ -538,12 +540,18 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
           api_log_warn(paste("[", request_id, "] Modern chronos approach failed:", chronos_result$error))
           api_log_info(paste("[", request_id, "] Proceeding with ROTL tree only (age data will be unavailable)"))
           ancestor_ages <- list()
+          age_assignment_method <- "none"  # No age data available
         }
       }, error = function(e) {
         api_log_error(paste("[", request_id, "] Could not create DateLife phylo tree:", conditionMessage(e)))
+        # Don't reset age_assignment_method here - it may have been set correctly by successful fallback
+        if (!exists("age_assignment_method")) {
+          age_assignment_method <<- "none"  # Only set to none if not already set
+        }
       })
     } else {
       api_log_info(paste("[", request_id, "] No DateLife chronograms available - proceeding without age data", sep=""))
+      age_assignment_method <- "none"  # No age data available
     }
     
     step_duration <- as.numeric(difftime(Sys.time(), step_start, units = "secs"))
@@ -559,7 +567,7 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
     update_progress_internal("network_conversion", "in_progress", 
                            list(step = "Converting ROTL tree to network format"))
     
-    network_data <- convert_phylo_to_network_hybrid(rotl_tree, valid_species, datelife_species, ancestor_ages, request_id)
+    network_data <- convert_phylo_to_network_hybrid(rotl_tree, valid_species, datelife_species, ancestor_ages, age_assignment_method, request_id)
     
     if (is.null(network_data) || nrow(network_data) == 0) {
       api_log_error(paste("[", request_id, "] Failed to convert tree to network format", sep=""))
@@ -683,7 +691,7 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
 #' @param ancestor_ages Named list mapping descendant combinations to ancestor ages
 #' @param request_id Optional request ID for logging correlation
 #' @return Data frame with parent-child network structure and age information
-convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_species, ancestor_ages, request_id = NULL) {
+convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_species, ancestor_ages, age_assignment_method = "chronos", request_id = NULL) {
   
   if (is.null(request_id)) {
     request_id <- "network_conv"
@@ -721,8 +729,8 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
         })))
   }
   
-  # Function to get age information for a species or node
-  get_age_info <- function(node_num, node_type) {
+  # Function to assign ages using chronos results (trust chronos completely)
+  assign_chronos_ages <- function(node_num, node_type) {
     if (node_num <= n_tips) {
       # Species node - species themselves don't have ages (they're at present time)
       tip_label <- phylo_tree$tip.label[node_num]
@@ -739,86 +747,238 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
       }
       return(list(info = "present", has_age = FALSE))
     } else {
-      # Internal node - try to find matching ancestor age from DateLife
-      # Get all descendant tips for this internal node
-      subtree <- extract.clade(phylo_tree, node_num)
-      descendants <- subtree$tip.label
-      
-      # Clean descendant names and match to DateLife format
+      # Internal node - use original chronos logic (CRITICAL: total_descendants check)
+      descendants <- extract.clade(phylo_tree, node_num)$tip.label
       datelife_descendants <- c()
       for (desc_tip in descendants) {
         tip_clean <- gsub("_ott\\d+", "", desc_tip)
         tip_clean <- gsub("_", " ", tip_clean)
-        
-        # Convert to DateLife format (underscores)
         tip_datelife <- gsub(" ", "_", tip_clean)
-        
-        # Check if this species is in DateLife data
         if (tip_datelife %in% datelife_species || tip_clean %in% datelife_species) {
           datelife_descendants <- c(datelife_descendants, tip_datelife)
         }
       }
       
-      # Check if this ROTL ancestor should have age data
-      # Only ancestors whose descendants are ALL in DateLife should get ages
+      # RESTORE ORIGINAL CHRONOS LOGIC: Only assign ages when ALL descendants are in DateLife
+      # This prevents age propagation to intermediate ancestors
       total_descendants <- length(descendants)
       
-      # First check if we have age data for any subset of these descendants
-      # This allows partial coverage instead of requiring all descendants to be in DateLife
-      desc_key <- paste(sort(datelife_descendants), collapse = "|")
+      if (length(datelife_descendants) >= 2 && length(datelife_descendants) == total_descendants) {
+        # All descendants of this ancestor are in DateLife - we can apply ages
+        desc_key <- paste(sort(datelife_descendants), collapse = "|")
+        
+        # Check if we have an exact match for this ancestor
+        if (desc_key %in% names(ancestor_ages)) {
+          ancestor_age_mya <- round(ancestor_ages[[desc_key]], 1)
+          return(list(info = paste0(ancestor_age_mya, " Mya"), has_age = TRUE))
+        }
+      }
       
-      # Check if we have an exact match for this ancestor
+      return(list(info = "age unavailable", has_age = FALSE))
+    }
+  }
+  
+  # Helper function to extract numeric age from age info string
+  extract_numeric_age <- function(age_result) {
+    if (is.null(age_result) || !age_result$has_age) {
+      return(NA_real_)
+    }
+    age_match <- regmatches(age_result$info, regexpr("\\d+\\.?\\d*", age_result$info))
+    if (length(age_match) > 0) {
+      return(as.numeric(age_match[1]))
+    }
+    return(NA_real_)
+  }
+
+  # Final phylogenetic consistency validation - removes conflicting parent ages
+  validate_phylogenetic_consistency_final <- function() {
+    api_log_info(paste("[", request_id, "] Starting final phylogenetic consistency validation..."))
+    conflicts_resolved <- 0
+    
+    # Check each parent-child edge in the tree
+    for (i in 1:nrow(phylo_tree$edge)) {
+      parent_num <- phylo_tree$edge[i, 1]
+      child_num <- phylo_tree$edge[i, 2]
+      
+      parent_key <- as.character(parent_num)
+      child_key <- as.character(child_num)
+      
+      # Extract ages from cache
+      parent_age_result <- node_age_cache[[parent_key]]
+      child_age_result <- node_age_cache[[child_key]]
+      
+      parent_age <- extract_numeric_age(parent_age_result)
+      child_age <- extract_numeric_age(child_age_result)
+      
+      # Check for phylogenetic conflict: parent age <= child age
+      if (!is.na(parent_age) && !is.na(child_age) && parent_age <= child_age) {
+        api_log_info(paste("[", request_id, "] FINAL VALIDATION CONFLICT: Parent node", parent_num, "(", parent_age, "Mya) younger than child node", child_num, "(", child_age, "Mya) - removing parent age"))
+        
+        # Remove the conflicting parent age, preserve the child age
+        node_age_cache[[parent_key]] <<- list(info = "age unavailable", has_age = FALSE)
+        
+        # Update the cached label to remove age information
+        parent_type <- node_type_cache[[parent_key]]
+        updated_label <- get_node_label_with_age(parent_num, parent_type)
+        node_label_cache[[parent_key]] <<- updated_label
+        
+        api_log_info(paste("[", request_id, "] CONFLICT RESOLVED: Removed age from parent node", parent_num, "- child age", child_age, "Mya preserved"))
+        conflicts_resolved <- conflicts_resolved + 1
+      }
+    }
+    
+    if (conflicts_resolved > 0) {
+      api_log_info(paste("[", request_id, "] Final phylogenetic validation completed -", conflicts_resolved, "parent age conflicts resolved"))
+    } else {
+      api_log_info(paste("[", request_id, "] Final phylogenetic validation completed - no conflicts found"))
+    }
+  }
+
+  # Helper function to get maximum age from child nodes for phylogenetic validation
+  get_max_child_age <- function(parent_node_num) {
+    # Find all direct children of this parent node
+    child_node_nums <- phylo_tree$edge[phylo_tree$edge[, 1] == parent_node_num, 2]
+    
+    if (length(child_node_nums) == 0) {
+      return(NA_real_)  # No children
+    }
+    
+    max_age <- NA_real_
+    
+    for (child_num in child_node_nums) {
+      # Check if this child already has age information in the cache
+      child_key <- as.character(child_num)
+      if (child_key %in% names(node_age_cache)) {
+        child_age_result <- node_age_cache[[child_key]]
+        if (child_age_result$has_age) {
+          # Extract numeric age from age info string
+          age_match <- regmatches(child_age_result$info, regexpr("\\d+\\.?\\d*", child_age_result$info))
+          if (length(age_match) > 0) {
+            child_age <- as.numeric(age_match[1])
+            if (is.na(max_age) || child_age > max_age) {
+              max_age <- child_age
+            }
+          }
+        }
+      }
+    }
+    
+    return(max_age)
+  }
+
+  # Function to assign ages using fallback pairwise method (includes MRCA logic)
+  assign_fallback_ages <- function(node_num, node_type) {
+    if (node_num <= n_tips) {
+      # Species node - same as chronos case
+      tip_label <- phylo_tree$tip.label[node_num]
+      tip_clean <- gsub("_ott\\d+", "", tip_label)
+      tip_clean <- gsub("_", " ", tip_clean)
+      
+      match_idx <- which(species_data$scientific == tip_clean)
+      if (length(match_idx) > 0) {
+        species_scientific <- species_data$scientific[match_idx[1]]
+        if (species_has_datelife_data(species_scientific)) {
+          return(list(info = "present (0 Mya)", has_age = TRUE))
+        }
+      }
+      return(list(info = "present", has_age = FALSE))
+    } else {
+      # Internal node - use MRCA logic for fallback pairwise ages
+      descendants <- extract.clade(phylo_tree, node_num)$tip.label
+      datelife_descendants <- c()
+      for (desc_tip in descendants) {
+        tip_clean <- gsub("_ott\\d+", "", desc_tip)
+        tip_clean <- gsub("_", " ", tip_clean)
+        tip_datelife <- gsub(" ", "_", tip_clean)
+        if (tip_datelife %in% datelife_species || tip_clean %in% datelife_species) {
+          datelife_descendants <- c(datelife_descendants, tip_datelife)
+        }
+      }
+      
+      # First check exact match
+      desc_key <- paste(sort(datelife_descendants), collapse = "|")
+      api_log_info(paste("DEBUG FALLBACK: node", node_num, "desc_key:", desc_key))
+      api_log_info(paste("DEBUG FALLBACK: available keys:", paste(names(ancestor_ages), collapse = ", ")))
+      
       if (desc_key %in% names(ancestor_ages)) {
         ancestor_age_mya <- round(ancestor_ages[[desc_key]], 1)
+        api_log_info(paste("DEBUG FALLBACK: EXACT MATCH found for", desc_key, "age:", ancestor_age_mya))
+        
+        # PHYLOGENETIC VALIDATION: Check if this age conflicts with any child node ages
+        max_child_age <- get_max_child_age(node_num)
+        if (!is.na(max_child_age) && ancestor_age_mya <= max_child_age) {
+          api_log_info(paste("DEBUG FALLBACK: PHYLOGENETIC CONFLICT - Node", node_num, "exact match age", ancestor_age_mya, "Mya would be younger than child age", max_child_age, "Mya - age assignment REJECTED"))
+          return(list(info = "age unavailable", has_age = FALSE))
+        }
+        
         return(list(info = paste0(ancestor_age_mya, " Mya"), has_age = TRUE))
       }
       
-      # NEW: Check if any pairwise age represents the MRCA of exactly these descendants
-      # This handles cases like Theria where we have Elephas-Setonix pairwise data
-      # but the node also includes Homo as a descendant
-      # IMPORTANT: Only assign age if this node is the MRCA of the pairwise species
+      # NEW PROPER MRCA LOGIC: For each pairwise age, find the true MRCA and check if it's this node
+      api_log_info(paste("DEBUG FALLBACK: Starting proper MRCA logic for node", node_num))
+      
+      # Collect all ages that belong to this node (handle multiple pairwise ages for same MRCA)
+      node_ages <- c()
+      
       for (age_key in names(ancestor_ages)) {
         age_descendants <- strsplit(age_key, "\\|")[[1]]
-        # Check if the pairwise descendants are ALL present in our node's descendants
-        # AND check that this is likely the MRCA by ensuring no child nodes contain all pairwise species
-        if (length(age_descendants) >= 2 && all(age_descendants %in% datelife_descendants)) {
-          # Additional check: verify this is the most specific node for these pairwise species
-          # by checking if any child nodes also contain all the pairwise species
-          is_most_specific <- TRUE
-          if (node_num > n_tips) {
-            # Get child nodes
-            edges_from_node <- which(phylo_tree$edge[,1] == node_num)
-            for (edge_idx in edges_from_node) {
-              child_node <- phylo_tree$edge[edge_idx, 2]
-              if (child_node > n_tips) {  # Only check internal nodes
-                child_subtree <- extract.clade(phylo_tree, child_node)
-                child_descendants <- child_subtree$tip.label
-                child_datelife_descendants <- c()
-                for (child_desc in child_descendants) {
-                  child_clean <- gsub("_ott\\d+", "", child_desc)
-                  child_clean <- gsub("_", " ", child_clean)
-                  child_datelife <- gsub(" ", "_", child_clean)
-                  if (child_datelife %in% datelife_species || child_clean %in% datelife_species) {
-                    child_datelife_descendants <- c(child_datelife_descendants, child_datelife)
-                  }
-                }
-                # If child node contains all pairwise species, then this is not the MRCA
-                if (all(age_descendants %in% child_datelife_descendants)) {
-                  is_most_specific <- FALSE
-                  break
-                }
-              }
+        api_log_info(paste("DEBUG FALLBACK: Processing pairwise age:", age_key, "with species:", paste(age_descendants, collapse = " + ")))
+        
+        # Only process pairwise relationships (exactly 2 species)
+        if (length(age_descendants) == 2) {
+          # Find the tip numbers for these two species in the phylogenetic tree
+          tip1_num <- NULL
+          tip2_num <- NULL
+          
+          for (i in 1:n_tips) {
+            tip_label <- phylo_tree$tip.label[i]
+            tip_clean <- gsub("_ott\\d+", "", tip_label)
+            tip_clean <- gsub("_", " ", tip_clean)
+            tip_datelife <- gsub(" ", "_", tip_clean)
+            
+            if (tip_datelife == age_descendants[1] || tip_clean == age_descendants[1]) {
+              tip1_num <- i
+            }
+            if (tip_datelife == age_descendants[2] || tip_clean == age_descendants[2]) {
+              tip2_num <- i
             }
           }
           
-          if (is_most_specific) {
-            ancestor_age_mya <- round(ancestor_ages[[age_key]], 1)
-            return(list(info = paste0(ancestor_age_mya, " Mya"), has_age = TRUE))
+          api_log_info(paste("DEBUG FALLBACK: Found tip numbers:", age_descendants[1], "=", tip1_num, ",", age_descendants[2], "=", tip2_num))
+          
+          if (!is.null(tip1_num) && !is.null(tip2_num)) {
+            # Find the MRCA of these two tips using ape::getMRCA
+            mrca_node <- getMRCA(phylo_tree, c(tip1_num, tip2_num))
+            api_log_info(paste("DEBUG FALLBACK: MRCA node for", age_descendants[1], "and", age_descendants[2], "is:", mrca_node))
+            
+            # If this current node IS the MRCA, collect the age
+            if (mrca_node == node_num) {
+              node_ages <- c(node_ages, ancestor_ages[[age_key]])
+              api_log_info(paste("DEBUG FALLBACK: Node", node_num, "is MRCA for", age_key, "- collected age:", ancestor_ages[[age_key]], "Mya"))
+            }
           }
         }
       }
       
-      # Only apply the complete coverage restriction if we didn't find an exact match
+      # If we found any ages for this node, validate against child ages before assignment
+      if (length(node_ages) > 0) {
+        median_age <- median(node_ages)
+        ancestor_age_mya <- round(median_age, 1)
+        
+        # PHYLOGENETIC VALIDATION: Check if this age conflicts with any child node ages
+        max_child_age <- get_max_child_age(node_num)
+        if (!is.na(max_child_age) && ancestor_age_mya <= max_child_age) {
+          api_log_info(paste("DEBUG FALLBACK: PHYLOGENETIC CONFLICT - Node", node_num, "age", ancestor_age_mya, "Mya would be younger than child age", max_child_age, "Mya - age assignment REJECTED"))
+          return(list(info = "age unavailable", has_age = FALSE))
+        }
+        
+        api_log_info(paste("DEBUG FALLBACK: SUCCESS! Node", node_num, "assigned median age:", ancestor_age_mya, "Mya from", length(node_ages), "pairwise relationships"))
+        return(list(info = paste0(ancestor_age_mya, " Mya"), has_age = TRUE))
+      }
+      
+      # RESTORE ORIGINAL FALLBACK LOGIC: Apply complete coverage restriction as fallback
+      # Only apply this if we didn't find an exact match or MRCA match above
+      total_descendants <- length(descendants)
       if (length(datelife_descendants) >= 2 && length(datelife_descendants) == total_descendants) {
         
         # If no exact match, check for subset matches within DateLife data
@@ -840,6 +1000,32 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
       } else {
         return(list(info = "age unavailable", has_age = FALSE))
       }
+    }
+  }
+
+  # Function to get age information for a species or node (dispatcher)
+  get_age_info <- function(node_num, node_type) {
+    # Debug logging to track method dispatch
+    method_exists <- exists("age_assignment_method")
+    current_method <- if (method_exists) age_assignment_method else "UNDEFINED"
+    
+    # Only log for internal nodes to avoid spam
+    if (node_num > n_tips) {
+      api_log_info(paste("DEBUG: get_age_info node", node_num, "- method exists:", method_exists, "method:", current_method))
+    }
+    
+    # Dispatch to the appropriate method based on how ages were assigned
+    if (exists("age_assignment_method") && age_assignment_method == "direct_pairwise_fallback") {
+      if (node_num > n_tips) {
+        api_log_info(paste("DEBUG: Using FALLBACK method for node", node_num))
+      }
+      return(assign_fallback_ages(node_num, node_type))
+    } else {
+      # Default to chronos method (or when no age method is set)
+      if (node_num > n_tips) {
+        api_log_info(paste("DEBUG: Using CHRONOS method for node", node_num))
+      }
+      return(assign_chronos_ages(node_num, node_type))
     }
   }
   
@@ -918,6 +1104,11 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
     node_age_cache[[as.character(node_num)]] <- node_age_result
     node_type_cache[[as.character(node_num)]] <- node_type
     node_label_cache[[as.character(node_num)]] <- node_label
+  }
+  
+  # FINAL PHYLOGENETIC VALIDATION: Remove conflicting parent ages (fallback method only)
+  if (exists("age_assignment_method") && age_assignment_method == "direct_pairwise_fallback") {
+    validate_phylogenetic_consistency_final()
   }
   
   # Process each edge in the ROTL tree using cached data
@@ -1003,8 +1194,12 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
     ), network_data)
   }
   
+  # Note: Phylogenetic age conflicts are now prevented during MRCA assignment phase
+  # No post-processing conflict resolution needed
+  
   return(network_data)
 }
+
 
 #' Transform hybrid network data to info panel format
 #' @param network_data Hybrid network data with AgeInfo and HasAge fields
