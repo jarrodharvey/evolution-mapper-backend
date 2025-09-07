@@ -93,44 +93,51 @@ create_chronos_calibrations <- function(rotl_tree, pairwise_ages, species_data, 
     stringsAsFactors = FALSE
   )
   
-  # Clean tip labels to match DateLife format (remove OTT IDs)
+  # Clean tip labels to match scientific names (remove OTT IDs)
   clean_tip_labels <- gsub("_ott\\d+", "", rotl_tree$tip.label)
   clean_tip_labels <- gsub("_", " ", clean_tip_labels)
   
+  # Create mapping from cleaned user scientific names to ROTL tips
+  user_scientific_clean <- clean_scientific_names(species_data$scientific)
+  tip_lookup <- setNames(rotl_tree$tip.label, clean_tip_labels)
+  
   for (pair_key in names(pairwise_ages)) {
-    # Parse the pair key correctly - it's in format "Species1_species1_Species2_species2"
-    # Need to split by "_" but then recombine genus + species
-    taxa <- strsplit(pair_key, "_")[[1]]
+    api_log_info(paste("[", request_id, "] Processing pair key:", pair_key))
     
-    # For binomial names, we expect 4 parts: Genus1, species1, Genus2, species2
-    if (length(taxa) >= 4) {
-      taxon1 <- paste(taxa[1], taxa[2])  # Genus species
-      taxon2 <- paste(taxa[3], taxa[4])  # Genus species
-    } else if (length(taxa) == 2) {
-      # If only 2 parts, assume they are complete species names with underscores
-      taxon1 <- gsub("_", " ", taxa[1])
-      taxon2 <- gsub("_", " ", taxa[2])  
+    # Convert DateLife pair key format back to individual species names
+    # Format: "Species1_name1_Species2_name2" -> find which ones match our cleaned user names
+    pair_components <- gsub("_", " ", strsplit(pair_key, "_")[[1]])
+    
+    # Find matches between pair components and user scientific names
+    matched_species <- c()
+    matched_tips <- c()
+    
+    for (user_sci_name in user_scientific_clean) {
+      # Check if this user scientific name appears in the pair key
+      if (user_sci_name %in% clean_tip_labels) {
+        # Build possible DateLife formats for this species name 
+        datelife_format <- gsub(" ", "_", user_sci_name)
+        if (grepl(datelife_format, pair_key, fixed = TRUE)) {
+          matched_species <- c(matched_species, user_sci_name)
+          matched_tips <- c(matched_tips, tip_lookup[[user_sci_name]])
+        }
+      }
+    }
+    
+    # We need exactly 2 matched species for a pairwise calibration
+    if (length(matched_species) == 2) {
+      taxon1 <- matched_species[1]
+      taxon2 <- matched_species[2]
+      rotl_tip1 <- matched_tips[1]
+      rotl_tip2 <- matched_tips[2]
     } else {
-      # Skip malformed keys
-      api_log_warn(paste("[", request_id, "] Malformed pair key:", pair_key))
+      api_log_warn(paste("[", request_id, "] Could not match pair key to exactly 2 user species:", pair_key, "- found", length(matched_species), "matches"))
       next
     }
     
     api_log_info(paste("[", request_id, "] Processing pair:", taxon1, "—", taxon2))
     
-    # Find corresponding tip labels in ROTL tree
-    rotl_tip1 <- NULL
-    rotl_tip2 <- NULL
-    
-    for (i in seq_along(clean_tip_labels)) {
-      if (clean_tip_labels[i] == taxon1) {
-        rotl_tip1 <- rotl_tree$tip.label[i]
-      }
-      if (clean_tip_labels[i] == taxon2) {
-        rotl_tip2 <- rotl_tree$tip.label[i]
-      }
-    }
-    
+    # ROTL tips already found in matching logic above
     if (!is.null(rotl_tip1) && !is.null(rotl_tip2)) {
       # Find the MRCA node in the ROTL tree
       mrca_node <- getMRCA(rotl_tree, tip = c(rotl_tip1, rotl_tip2))

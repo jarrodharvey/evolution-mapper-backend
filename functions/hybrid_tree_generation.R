@@ -759,8 +759,37 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
         }
       }
       
-      # RESTORE ORIGINAL CHRONOS LOGIC: Only assign ages when ALL descendants are in DateLife
-      # This prevents age propagation to intermediate ancestors
+      # CRITICAL SCIENTIFIC CONSTRAINT: Only assign ages when ALL descendants are in DateLife
+      # 
+      # WHY THIS RESTRICTION EXISTS:
+      # DateLife ages represent the MRCA (Most Recent Common Ancestor) of ONLY the species 
+      # present in the chronogram data. If a tree node has additional descendants not in 
+      # DateLife, then that node represents a DIFFERENT, OLDER MRCA than what DateLife measured.
+      #
+      # EXAMPLE PROBLEM:
+      # - DateLife finds: Merluccius ↔ Chitala MRCA = 187.1 Mya (2 species)
+      # - Tree node has: Merluccius + Chitala + Periophthalmus (3 species)
+      # - These represent DIFFERENT evolutionary nodes with DIFFERENT ages!
+      # - The true tree structure is:
+      #     --- Node X (age > 187.1 Mya) ← This is what the tree node represents
+      #    |
+      #    '---- Periophthalmus (missing from DateLife)
+      #    |
+      #    '---- Node Y (age = 187.1 Mya) ← This is what DateLife measured
+      #         |
+      #         '---- Merluccius
+      #         '---- Chitala
+      #
+      # PREVENTING SCIENTIFIC ERRORS:
+      # Assigning 187.1 Mya to Node X would:
+      # 1. Systematically underestimate divergence times (X > 187.1, but showing X = 187.1)
+      # 2. Create false topologies (imply simultaneous 3-way split instead of nested splits)
+      # 3. Corrupt downstream evolutionary analyses (diversification rates, biogeography)
+      # 4. Mislead users about actual evolutionary relationships and timing
+      #
+      # SCIENTIFIC PRINCIPLE:
+      # Better to show "Age data unavailable" than scientifically incorrect information.
+      # This maintains the tool's credibility and prevents propagation of false conclusions.
       total_descendants <- length(descendants)
       
       if (length(datelife_descendants) >= 2 && length(datelife_descendants) == total_descendants) {
