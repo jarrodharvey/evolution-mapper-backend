@@ -1332,24 +1332,64 @@ create_hybrid_tree_visualization <- function(network_data, request_id = NULL, pr
             return transition;
           };
           
-          // Recursive function to click all nodes with hidden children (_children)
+          // Sequential expansion function - each node waits for previous to complete
           function expandAll() {
             var nodes = d3.select(el).selectAll('g.node').filter(function(d) {
               return d._children;
             });
             
             if (nodes.size() > 0) {
-              nodes.each(function(d, i, nodes) {
+              // Group nodes by their depth level
+              var nodesByDepth = new Map();
+              nodes.each(function(d) {
+                if (!nodesByDepth.has(d.depth)) {
+                  nodesByDepth.set(d.depth, []);
+                }
+                nodesByDepth.get(d.depth).push({ element: this, data: d });
+              });
+              
+              // Sort nodes within each level by their vertical position (y coordinate)
+              nodesByDepth.forEach(function(levelNodes) {
+                levelNodes.sort(function(a, b) {
+                  return a.data.y - b.data.y; // Top to bottom ordering
+                });
+              });
+              
+              // Get sorted depth levels and flatten into single array
+              var sortedDepths = Array.from(nodesByDepth.keys()).sort(function(a, b) {
+                return a - b;
+              });
+              
+              var allNodes = [];
+              sortedDepths.forEach(function(depth) {
+                var levelNodes = nodesByDepth.get(depth);
+                allNodes = allNodes.concat(levelNodes);
+              });
+              
+              // Expand nodes one by one, waiting for each to complete
+              function expandNext(index) {
+                if (index >= allNodes.length) {
+                  // All nodes in this batch are expanded, check for more
+                  setTimeout(expandAll, 100);
+                  return;
+                }
+                
+                var nodeInfo = allNodes[index];
                 var clickEvent = new MouseEvent('click', {
                   bubbles: true,
                   cancelable: true,
                   view: window
                 });
-                this.dispatchEvent(clickEvent);
-              });
+                nodeInfo.element.dispatchEvent(clickEvent);
+                
+                // Wait for this node's animation to complete before expanding next
+                setTimeout(function() {
+                  expandNext(index + 1);
+                }, ", expansion_speed, " + 50);
+              }
               
-              // Wait for transitions to complete, then check for more collapsed nodes
-              setTimeout(expandAll, ", expansion_speed, " + 100);
+              // Start the sequential expansion
+              expandNext(0);
             } else {
               // All nodes expanded! Restore default 750ms speed for future user interactions
               d3.selection.prototype.transition = originalTransition;
