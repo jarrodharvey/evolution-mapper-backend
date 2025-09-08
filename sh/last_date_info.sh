@@ -3,12 +3,48 @@
 # Script to extract pairwise ages from the most recent API request
 # and map them to common names
 
-LOG_FILE="logs/api.log"
+# Check for --droplet flag
+USE_DROPLET=false
+if [[ "$1" == "--droplet" ]]; then
+    USE_DROPLET=true
+    echo "🌐 Querying logs from DigitalOcean droplet..."
+    echo
+fi
 
-# Check if log file exists
-if [[ ! -f "$LOG_FILE" ]]; then
-    echo "Error: Log file $LOG_FILE not found"
-    exit 1
+if [[ "$USE_DROPLET" == "true" ]]; then
+    # Source .Renviron to get DO_DROPLET_DOMAIN
+    if [[ -f ".Renviron" ]]; then
+        export $(grep -v '^#' .Renviron | xargs)
+    fi
+    
+    if [[ -z "$DO_DROPLET_DOMAIN" ]]; then
+        echo "Error: DO_DROPLET_DOMAIN not found in .Renviron"
+        exit 1
+    fi
+    
+    # Create temporary file for remote log content
+    REMOTE_LOG=$(mktemp)
+    LOG_FILE="$REMOTE_LOG"
+    
+    # Copy remote log file via SSH
+    if ! scp "root@$DO_DROPLET_DOMAIN:/var/plumber/evolution-mapper/logs/api.log" "$REMOTE_LOG" 2>/dev/null; then
+        echo "Error: Could not retrieve log file from droplet $DO_DROPLET_DOMAIN"
+        echo "Make sure SSH access is configured and the service is running"
+        rm -f "$REMOTE_LOG"
+        exit 1
+    fi
+    
+    # Set cleanup for remote log file
+    trap "rm -f $REMOTE_LOG" EXIT
+else
+    LOG_FILE="logs/api.log"
+    
+    # Check if local log file exists
+    if [[ ! -f "$LOG_FILE" ]]; then
+        echo "Error: Log file $LOG_FILE not found"
+        echo "Use --droplet flag to query remote logs"
+        exit 1
+    fi
 fi
 
 # Extract the most recent request ID
