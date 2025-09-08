@@ -39,22 +39,36 @@ echo "Common names: $COMMON_NAMES"
 echo "Scientific names: $SCIENTIFIC_NAMES"
 echo
 
+# Create temporary files for name mapping
+TEMP_COMMON=$(mktemp)
+TEMP_SCIENTIFIC=$(mktemp)
+
+# Convert comma-separated lists to line-separated for easier processing
+echo "$COMMON_NAMES" | tr ',' '\n' | sed 's/^[ \t]*//;s/[ \t]*$//' > "$TEMP_COMMON"
+echo "$SCIENTIFIC_NAMES" | tr ',' '\n' | sed 's/^[ \t]*//;s/[ \t]*$//' > "$TEMP_SCIENTIFIC"
+
 # Function to map scientific name to common name
 map_scientific_to_common() {
     local sci_name="$1"
     local sci_clean=$(echo "$sci_name" | sed 's/_/ /g')
     
-    case "$sci_clean" in
-        "Characidium fasciatum") echo "Banded characidium" ;;
-        "Crenimugil crenilabis") echo "Warty-lip mullet" ;;
-        "Plectropomus leopardus") echo "Bluedotted coraltrout" ;;
-        "Pholidota (order in Opisthokonta)") echo "Scaly anteater" ;;
-        "Doryichthys boaja") echo "Long-snouted pipefish" ;;
-        "Goggia rupicola") echo "Namaqua dwarf leaf-toed gecko" ;;
-        "Hypochaeris radicata") echo "Flatweed" ;;
-        *) echo "$sci_clean" ;;
-    esac
+    # Find the line number of this scientific name
+    local line_num=$(grep -n "^${sci_clean}$" "$TEMP_SCIENTIFIC" | cut -d: -f1)
+    
+    if [[ -n "$line_num" ]]; then
+        # Get the corresponding common name
+        sed -n "${line_num}p" "$TEMP_COMMON"
+    else
+        # Fallback: return the cleaned scientific name with indicator
+        echo "$sci_clean [scientific name]"
+    fi
 }
+
+# Cleanup function
+cleanup() {
+    rm -f "$TEMP_COMMON" "$TEMP_SCIENTIFIC"
+}
+trap cleanup EXIT
 
 
 echo "=== Pairwise Ages Found ==="
