@@ -56,6 +56,7 @@ map_scientific_to_common() {
     esac
 }
 
+
 echo "=== Pairwise Ages Found ==="
 echo
 
@@ -82,6 +83,7 @@ echo
 echo "=== Summary ==="
 TOTAL_AGES=$(grep "\[ $LATEST_REQUEST \] Found age:" "$LOG_FILE" | wc -l)
 echo "Total pairwise ages found: $TOTAL_AGES"
+
 
 # Show coverage information if available
 COVERAGE_LINE=$(grep "\[ $LATEST_REQUEST \] .*Species with ages:" "$LOG_FILE" | tail -1)

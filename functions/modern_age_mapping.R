@@ -305,8 +305,6 @@ generate_dated_tree_chronos <- function(rotl_tree, datelife_results, species_dat
     
     # Get the branching times (this gives us all internal node ages)
     branching_times_tree <- branching.times(dated_tree)
-    root_age <- max(branching_times_tree)
-    api_log_info(paste("[", request_id, "] Root age:", round(root_age, 1), "Mya"))
     
     # Clean tip labels to match DateLife format for comparison
     clean_tip_labels <- gsub("_ott\\d+", "", dated_tree$tip.label)
@@ -347,27 +345,34 @@ generate_dated_tree_chronos <- function(rotl_tree, datelife_results, species_dat
             node_age <- root_depth - node_depths[mrca_node]
             
             if (!is.na(node_age)) {
-              # Create the descendant key for this pair (DateLife format)
+              # Store age by node number (preferred method)
+              node_key <- paste0("node_", mrca_node)
+              if (is.null(node_ages[[node_key]])) {
+                node_ages[[node_key]] <- c()
+              }
+              node_ages[[node_key]] <- c(node_ages[[node_key]], node_age)
+              
+              # Also store by descendant key for backward compatibility
               species1_datelife <- gsub(" ", "_", species1)
               species2_datelife <- gsub(" ", "_", species2)
               desc_key <- paste(sort(c(species1_datelife, species2_datelife)), collapse = "|")
-              
               node_ages[[desc_key]] <- node_age
-              api_log_info(paste("[", request_id, "] Node age: MRCA of", species1_datelife, "and", species2_datelife, "=", round(node_age, 1), "Mya"))
+              
+              api_log_info(paste("[", request_id, "] Node age: MRCA of", species1_datelife, "and", species2_datelife, "=", round(node_age, 1), "Mya (Node", mrca_node, ")"))
             }
           }
         }
       }
     }
     
-    # Also try to extract ages for larger groups (e.g., all 3 species)
-    # Find the root node age and assign it to all species combined
-    if (length(clean_tip_labels) >= 3) {
-      # Get all species in DateLife format
-      all_species_datelife <- sort(gsub(" ", "_", clean_tip_labels))
-      root_desc_key <- paste(all_species_datelife, collapse = "|")
-      node_ages[[root_desc_key]] <- root_age
-      api_log_info(paste("[", request_id, "] Root node age: MRCA of all species =", round(root_age, 1), "Mya"))
+    
+    # Consolidate multiple ages for same nodes using median
+    for (key in names(node_ages)) {
+      if (startsWith(key, "node_") && length(node_ages[[key]]) > 1) {
+        median_age <- median(node_ages[[key]])
+        api_log_info(paste("[", request_id, "] Node", gsub("node_", "", key), "multiple ages consolidated:", paste(round(node_ages[[key]], 1), collapse = ", "), "Mya → median:", round(median_age, 1), "Mya"))
+        node_ages[[key]] <- median_age
+      }
     }
     
     api_log_info(paste("[", request_id, "] Modern chronos approach completed successfully"))
