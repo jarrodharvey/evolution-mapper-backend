@@ -33,6 +33,125 @@ clean_scientific_names <- function(scientific_names) {
   return(cleaned)
 }
 
+#' Assess calibration quality for reliable root age estimation
+#' @param phylo_tree ROTL phylo tree  
+#' @param calibrations Calibration points data frame
+#' @param species_data Species data with DateLife availability
+#' @param request_id Optional request ID for logging
+#' @return List with quality assessment results
+assess_calibration_quality <- function(phylo_tree, calibrations, species_data, request_id = "quality_check") {
+  
+  api_log_info(paste("[", request_id, "] Assessing calibration quality for root age reliability"))
+  
+  if (is.null(calibrations) || nrow(calibrations) == 0) {
+    api_log_warn(paste("[", request_id, "] No calibrations available - root age unreliable"))
+    return(list(
+      sufficient_quality = FALSE,
+      reason = "No calibration points available",
+      recommendation = "Display 'Uncalibrated' for root"
+    ))
+  }
+  
+  n_tips <- length(phylo_tree$tip.label)
+  n_calibrations <- nrow(calibrations)
+  
+  api_log_info(paste("[", request_id, "] Calibration assessment: ", n_calibrations, " calibrations for ", n_tips, " species"))
+  
+  # Quality metric 1: Minimum calibration threshold
+  # Need at least 2 calibrations for any meaningful root age estimation
+  if (n_calibrations < 2) {
+    api_log_warn(paste("[", request_id, "] Insufficient calibrations (", n_calibrations, " < 2) - root age unreliable"))
+    return(list(
+      sufficient_quality = FALSE,
+      reason = paste("Only", n_calibrations, "calibration point(s) available"),
+      recommendation = "Need ≥2 calibrations for root age estimation"
+    ))
+  }
+  
+  # Quality metric 2: Deep lineage coverage
+  # Check if calibrations span different major lineages from the root
+  # Get the sister groups that branch directly from the root
+  root_children <- phylo_tree$edge[phylo_tree$edge[, 1] == (n_tips + 1), 2]
+  
+  if (length(root_children) < 2) {
+    api_log_warn(paste("[", request_id, "] Tree topology issue - root has < 2 children"))
+    return(list(
+      sufficient_quality = FALSE,
+      reason = "Unusual tree topology",
+      recommendation = "Root age calculation not applicable"
+    ))
+  }
+  
+  # Check if we have calibrations in different sister lineages from the root
+  calibrated_lineages <- 0
+  for (child in root_children) {
+    # Get all descendants of this root child
+    if (child <= n_tips) {
+      # Direct tip descendant
+      descendants <- child
+    } else {
+      # Internal node - get all tip descendants  
+      descendants <- extract.clade(phylo_tree, child)$tip.label
+      descendants <- match(descendants, phylo_tree$tip.label)
+    }
+    
+    # Check if any calibrations involve species from this lineage
+    lineage_has_calibration <- FALSE
+    for (i in 1:nrow(calibrations)) {
+      calib_species <- c(calibrations$species1[i], calibrations$species2[i])
+      # Clean tip labels to match calibration species format
+      clean_tips <- gsub("_ott\\d+", "", phylo_tree$tip.label[descendants])
+      clean_tips <- gsub("_", " ", clean_tips)
+      
+      if (any(calib_species %in% clean_tips)) {
+        lineage_has_calibration <- TRUE
+        break
+      }
+    }
+    
+    if (lineage_has_calibration) {
+      calibrated_lineages <- calibrated_lineages + 1
+    }
+  }
+  
+  api_log_info(paste("[", request_id, "] Deep lineage coverage: ", calibrated_lineages, "/", length(root_children), " root sister groups have calibrations"))
+  
+  # Quality metric 3: Coverage ratio
+  # What percentage of total species have DateLife data?
+  datelife_coverage_pct <- (sum(!is.na(species_data$datelife_available) & species_data$datelife_available) / nrow(species_data)) * 100
+  
+  api_log_info(paste("[", request_id, "] DateLife coverage: ", round(datelife_coverage_pct, 1), "% of species"))
+  
+  # Decision criteria based on Gemini's research
+  sufficient_quality <- FALSE
+  reason <- ""
+  recommendation <- ""
+  
+  if (calibrated_lineages >= 2) {
+    # Good: Calibrations in multiple sister lineages from root
+    sufficient_quality <- TRUE
+    reason <- paste("Strong calibration quality:", calibrated_lineages, "root sister lineages calibrated")
+    recommendation <- "Root age display scientifically justified"
+    api_log_info(paste("[", request_id, "] QUALITY PASS: Root age is scientifically defensible"))
+  } else {
+    # Poor: Calibrations clustered in single lineage - root age is unreliable extrapolation
+    sufficient_quality <- FALSE
+    reason <- paste("Insufficient deep coverage - only", calibrated_lineages, "root sister lineage(s) calibrated")
+    recommendation <- "Root age would be unreliable extrapolation - display 'Insufficient calibration data'"
+    api_log_warn(paste("[", request_id, "] QUALITY FAIL: Root age not scientifically defensible"))
+  }
+  
+  return(list(
+    sufficient_quality = sufficient_quality,
+    reason = reason, 
+    recommendation = recommendation,
+    n_calibrations = n_calibrations,
+    calibrated_lineages = calibrated_lineages,
+    total_lineages = length(root_children),
+    datelife_coverage_pct = round(datelife_coverage_pct, 1)
+  ))
+}
+
 #' Get current OTT ID for scientific name using TNRS with tree validation and disk caching
 #' @param scientific_name Scientific name to look up
 #' @param request_id Request ID for logging
@@ -534,6 +653,12 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
           root_age <- max(branching_times_tree)
           api_log_info(paste("[", request_id, "] Root age from chronos:", round(root_age, 1), "Mya"))
           
+          # CRITICAL: Assess calibration quality before including root age
+          calibration_quality <- assess_calibration_quality(rotl_tree, chronos_result$calibrations_used, species_data, request_id)
+          
+          # Store quality assessment for later use in network conversion
+          attr(ancestor_ages, "root_quality_check") <- calibration_quality
+          
           api_log_info(paste("[", request_id, "] Extracted ancestor ages for", length(ancestor_ages), "internal nodes from modern chronos"))
           
         } else {
@@ -755,6 +880,84 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
       rotl_node_ages[[node_key]] <- median_age
     } else {
       rotl_node_ages[[node_key]] <- rotl_node_ages[[node_key]][1]
+    }
+  }
+  
+  # CRITICAL: Apply quality check to exclude unreliable root age extrapolations only
+  if (age_assignment_method == "chronos") {
+    quality_check <- attr(ancestor_ages, "root_quality_check")
+    if (!is.null(quality_check) && !quality_check$sufficient_quality) {
+      # Quality check FAILED - identify and remove root extrapolations from already-mapped node ages
+      api_log_warn(paste("[", request_id, "] Applying selective quality filter: Removing root extrapolated ages only"))
+      api_log_warn(paste("[", request_id, "] Quality assessment:", quality_check$reason))
+      
+      # Identify which rotl_node_ages contain root extrapolations by checking the source ancestor_ages
+      n_species <- length(phylo_tree$tip.label)
+      filtered_count <- 0
+      
+      # Check which nodes had root extrapolations contribute to their ages
+      # We need to re-examine the mapping process to identify contaminated nodes
+      for (ancestor_key in names(ancestor_ages)) {
+        if (!startsWith(ancestor_key, "node_") && grepl("\\|", ancestor_key)) {
+          # Count species in this key
+          species_in_key <- length(strsplit(ancestor_key, "\\|")[[1]])
+          
+          # If this key represents most/all species, it contributed root extrapolation
+          if (species_in_key >= n_species - 1) {  # Root or near-root extrapolation
+            api_log_info(paste("[", request_id, "] Identified root extrapolation source:", ancestor_key, "(", species_in_key, "species)"))
+            
+            # Find which rotl_node this mapped to by re-doing the mapping logic
+            species_pair <- strsplit(ancestor_key, "\\|")[[1]]
+            tip1 <- NULL
+            tip2 <- NULL
+            
+            # Find first two species to get MRCA (same as original mapping logic)
+            species_found <- 0
+            tip_indices <- c()
+            
+            for (species in species_pair) {
+              for (tip_label in phylo_tree$tip.label) {
+                tip_clean <- gsub("_ott\\d+", "", tip_label)
+                tip_clean <- gsub("_", " ", tip_clean)
+                species_clean <- gsub("_", " ", species)
+                
+                if (tip_clean == species_clean || tip_clean == species) {
+                  tip_indices <- c(tip_indices, which(phylo_tree$tip.label == tip_label))
+                  species_found <- species_found + 1
+                  if (species_found >= 2) break  # We have enough to find MRCA
+                }
+              }
+              if (species_found >= 2) break
+            }
+            
+            # Find MRCA for root extrapolation
+            if (length(tip_indices) >= 2) {
+              mrca_node <- getMRCA(phylo_tree, tip = tip_indices[1:2])  # Use first two species
+              if (!is.null(mrca_node) && !is.na(mrca_node)) {
+                node_key <- paste0("rotl_node_", mrca_node)
+                
+                # Check if this node has ages and remove them if it's contaminated with root extrapolation
+                if (node_key %in% names(rotl_node_ages)) {
+                  # This node is contaminated with root extrapolation - remove it entirely
+                  api_log_info(paste("[", request_id, "] Node", mrca_node, "contaminated with root extrapolation - removing all ages"))
+                  rotl_node_ages[[node_key]] <- NULL
+                  filtered_count <- filtered_count + 1
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      if (filtered_count > 0) {
+        api_log_info(paste("[", request_id, "] Filtered out", filtered_count, "nodes contaminated with root extrapolations, preserved", length(rotl_node_ages), "clean pairwise ages"))
+      } else {
+        api_log_info(paste("[", request_id, "] No root extrapolation contamination found to filter"))
+      }
+      
+    } else if (!is.null(quality_check) && quality_check$sufficient_quality) {
+      api_log_info(paste("[", request_id, "] Quality check passed - all chronos ages approved for display"))
+      api_log_info(paste("[", request_id, "] Quality assessment:", quality_check$reason))
     }
   }
   
@@ -1189,6 +1392,54 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
     
     root_name <- "Common ancestor"
     
+    # Pre-calculate root display name with age information for chronos method
+    root_age_info <- "age unavailable"
+    root_has_age <- FALSE
+    root_display_name <- root_name
+    
+    # "Common ancestor" should always remain a clean static label - age goes on taxonomic root instead
+    if (root_name == "Common ancestor") {
+      # Keep "Common ancestor" as clean static conceptual label
+      root_display_name <- root_name
+      api_log_info(paste("[", request_id, "] Keeping 'Common ancestor' as clean static label - age information will appear on taxonomic root"))
+    } else {
+      # For actual taxonomic roots (like "Euteleostomi"), apply chronos age logic
+      if (exists("age_assignment_method") && age_assignment_method == "chronos") {
+        # Check calibration quality from stored assessment
+        quality_check <- attr(ancestor_ages, "root_quality_check")
+        
+        if (!is.null(quality_check)) {
+          if (quality_check$sufficient_quality) {
+            # Quality check PASSED - safe to display chronos root age
+            if (length(ancestor_ages) > 0) {
+              # Find the key that represents all species (longest key with most species)
+              all_species_keys <- names(ancestor_ages)[sapply(names(ancestor_ages), function(key) grepl("\\|", key))]
+              if (length(all_species_keys) > 0) {
+                # Use the key with the most species (should be the root)
+                root_key <- all_species_keys[which.max(sapply(all_species_keys, function(key) length(strsplit(key, "\\|")[[1]])))]
+                if (!is.null(ancestor_ages[[root_key]])) {
+                  root_age_info <- paste0(round(ancestor_ages[[root_key]], 1), " Mya")
+                  root_has_age <- TRUE
+                  # Include age in root display name for CollapsibleTree visualization
+                  root_display_name <- paste0(root_name, " (", root_age_info, ")")
+                  api_log_info(paste("[", request_id, "] Including scientifically justified chronos root age:", root_age_info, "- Quality:", quality_check$reason))
+                }
+              }
+            }
+          } else {
+            # Quality check FAILED - do not display root age, clean root name without extra messaging
+            api_log_warn(paste("[", request_id, "] Excluding chronos root age - insufficient calibration quality:", quality_check$reason))
+            root_display_name <- root_name  # Clean name - missing age data represented by absence
+          }
+        } else {
+          api_log_warn(paste("[", request_id, "] No quality check available - excluding root age as precaution"))
+          root_display_name <- root_name  # Clean name - missing age data represented by absence
+        }
+      } else {
+        api_log_info(paste("[", request_id, "] Excluding root age from visualization (pairwise method - no integrated clock model)"))
+      }
+    }
+    
     if (length(orphaned_parents) > 0) {
       for (orphaned_parent in orphaned_parents) {
         # Determine node type
@@ -1220,7 +1471,7 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
         }
         
         network_data <- rbind(data.frame(
-          from = root_name,
+          from = root_display_name,
           to = orphaned_parent,
           NodeType = node_type,
           AgeInfo = age_info,
@@ -1230,13 +1481,13 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
       }
     }
     
-    # Add root row
+    # Add root row (display name and age info already calculated above)
     network_data <- rbind(data.frame(
       from = NA,
-      to = root_name,
+      to = root_display_name,
       NodeType = "root",
-      AgeInfo = "age unavailable",
-      HasAge = FALSE,
+      AgeInfo = root_age_info,
+      HasAge = root_has_age,
       stringsAsFactors = FALSE
     ), network_data)
   }

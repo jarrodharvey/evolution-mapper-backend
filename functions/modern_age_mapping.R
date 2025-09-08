@@ -305,6 +305,8 @@ generate_dated_tree_chronos <- function(rotl_tree, datelife_results, species_dat
     
     # Get the branching times (this gives us all internal node ages)
     branching_times_tree <- branching.times(dated_tree)
+    root_age <- max(branching_times_tree)
+    api_log_info(paste("[", request_id, "] Chronos root age:", round(root_age, 1), "Mya (integrated clock model)"))
     
     # Clean tip labels to match DateLife format for comparison
     clean_tip_labels <- gsub("_ott\\d+", "", dated_tree$tip.label)
@@ -365,6 +367,15 @@ generate_dated_tree_chronos <- function(rotl_tree, datelife_results, species_dat
       }
     }
     
+    
+    # Add chronos-derived root age for integrated clock model (scientifically justified)
+    if (length(clean_tip_labels) >= 3) {
+      # Get all species in DateLife format for root key
+      all_species_datelife <- sort(gsub(" ", "_", clean_tip_labels))
+      root_desc_key <- paste(all_species_datelife, collapse = "|")
+      node_ages[[root_desc_key]] <- root_age
+      api_log_info(paste("[", request_id, "] Chronos root node age: MRCA of all species =", round(root_age, 1), "Mya (integrated clock model)"))
+    }
     
     # Consolidate multiple ages for same nodes using median
     for (key in names(node_ages)) {
