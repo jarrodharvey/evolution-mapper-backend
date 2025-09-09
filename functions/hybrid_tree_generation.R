@@ -832,7 +832,33 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
   rotl_node_ages <- list()
   
   # Process pairwise age data (non-node keys from ancestor_ages)
-  for (key in names(ancestor_ages)) {
+  # CRITICAL: Filter out root extrapolations BEFORE mapping to prevent contamination
+  n_species <- length(phylo_tree$tip.label)
+  
+  # Apply quality check to exclude unreliable root age extrapolations early
+  filtered_ancestor_ages <- ancestor_ages
+  quality_check <- attr(ancestor_ages, "root_quality_check")
+  
+  if (age_assignment_method == "chronos" && !is.null(quality_check) && !quality_check$sufficient_quality) {
+    api_log_warn(paste("[", request_id, "] Applying early quality filter: Removing root extrapolated ages before node mapping"))
+    api_log_warn(paste("[", request_id, "] Quality assessment:", quality_check$reason))
+    
+    # Remove root extrapolation keys before mapping
+    for (ancestor_key in names(ancestor_ages)) {
+      if (!startsWith(ancestor_key, "node_") && grepl("\\|", ancestor_key)) {
+        species_in_key <- length(strsplit(ancestor_key, "\\|")[[1]])
+        if (species_in_key >= n_species) {  # Root extrapolation (all species)
+          api_log_info(paste("[", request_id, "] Removing root extrapolation source before mapping:", ancestor_key, "(", species_in_key, "species)"))
+          filtered_ancestor_ages[[ancestor_key]] <- NULL
+        }
+      }
+    }
+    
+    api_log_info(paste("[", request_id, "] Filtered ancestor_ages:", length(ancestor_ages), "→", length(filtered_ancestor_ages), "entries"))
+  }
+  
+  # Process remaining (clean) pairwise age data
+  for (key in names(filtered_ancestor_ages)) {
     if (!startsWith(key, "node_") && grepl("\\|", key)) {
       # This is a pairwise key like "Characidium_fasciatum|Crenimugil_crenilabis"
       species_pair <- strsplit(key, "\\|")[[1]]
@@ -865,8 +891,8 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
           if (is.null(rotl_node_ages[[node_key]])) {
             rotl_node_ages[[node_key]] <- c()
           }
-          rotl_node_ages[[node_key]] <- c(rotl_node_ages[[node_key]], ancestor_ages[[key]])
-          api_log_info(paste("[", request_id, "] Mapped age:", key, "→ ROTL Node", mrca_node, "=", round(ancestor_ages[[key]], 1), "Mya"))
+          rotl_node_ages[[node_key]] <- c(rotl_node_ages[[node_key]], filtered_ancestor_ages[[key]])
+          api_log_info(paste("[", request_id, "] Mapped age:", key, "→ ROTL Node", mrca_node, "=", round(filtered_ancestor_ages[[key]], 1), "Mya"))
         }
       }
     }
@@ -883,83 +909,8 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
     }
   }
   
-  # CRITICAL: Apply quality check to exclude unreliable root age extrapolations only
-  if (age_assignment_method == "chronos") {
-    quality_check <- attr(ancestor_ages, "root_quality_check")
-    if (!is.null(quality_check) && !quality_check$sufficient_quality) {
-      # Quality check FAILED - identify and remove root extrapolations from already-mapped node ages
-      api_log_warn(paste("[", request_id, "] Applying selective quality filter: Removing root extrapolated ages only"))
-      api_log_warn(paste("[", request_id, "] Quality assessment:", quality_check$reason))
-      
-      # Identify which rotl_node_ages contain root extrapolations by checking the source ancestor_ages
-      n_species <- length(phylo_tree$tip.label)
-      filtered_count <- 0
-      
-      # Check which nodes had root extrapolations contribute to their ages
-      # We need to re-examine the mapping process to identify contaminated nodes
-      for (ancestor_key in names(ancestor_ages)) {
-        if (!startsWith(ancestor_key, "node_") && grepl("\\|", ancestor_key)) {
-          # Count species in this key
-          species_in_key <- length(strsplit(ancestor_key, "\\|")[[1]])
-          
-          # If this key represents most/all species, it contributed root extrapolation
-          if (species_in_key >= n_species - 1) {  # Root or near-root extrapolation
-            api_log_info(paste("[", request_id, "] Identified root extrapolation source:", ancestor_key, "(", species_in_key, "species)"))
-            
-            # Find which rotl_node this mapped to by re-doing the mapping logic
-            species_pair <- strsplit(ancestor_key, "\\|")[[1]]
-            tip1 <- NULL
-            tip2 <- NULL
-            
-            # Find first two species to get MRCA (same as original mapping logic)
-            species_found <- 0
-            tip_indices <- c()
-            
-            for (species in species_pair) {
-              for (tip_label in phylo_tree$tip.label) {
-                tip_clean <- gsub("_ott\\d+", "", tip_label)
-                tip_clean <- gsub("_", " ", tip_clean)
-                species_clean <- gsub("_", " ", species)
-                
-                if (tip_clean == species_clean || tip_clean == species) {
-                  tip_indices <- c(tip_indices, which(phylo_tree$tip.label == tip_label))
-                  species_found <- species_found + 1
-                  if (species_found >= 2) break  # We have enough to find MRCA
-                }
-              }
-              if (species_found >= 2) break
-            }
-            
-            # Find MRCA for root extrapolation
-            if (length(tip_indices) >= 2) {
-              mrca_node <- getMRCA(phylo_tree, tip = tip_indices[1:2])  # Use first two species
-              if (!is.null(mrca_node) && !is.na(mrca_node)) {
-                node_key <- paste0("rotl_node_", mrca_node)
-                
-                # Check if this node has ages and remove them if it's contaminated with root extrapolation
-                if (node_key %in% names(rotl_node_ages)) {
-                  # This node is contaminated with root extrapolation - remove it entirely
-                  api_log_info(paste("[", request_id, "] Node", mrca_node, "contaminated with root extrapolation - removing all ages"))
-                  rotl_node_ages[[node_key]] <- NULL
-                  filtered_count <- filtered_count + 1
-                }
-              }
-            }
-          }
-        }
-      }
-      
-      if (filtered_count > 0) {
-        api_log_info(paste("[", request_id, "] Filtered out", filtered_count, "nodes contaminated with root extrapolations, preserved", length(rotl_node_ages), "clean pairwise ages"))
-      } else {
-        api_log_info(paste("[", request_id, "] No root extrapolation contamination found to filter"))
-      }
-      
-    } else if (!is.null(quality_check) && quality_check$sufficient_quality) {
-      api_log_info(paste("[", request_id, "] Quality check passed - all chronos ages approved for display"))
-      api_log_info(paste("[", request_id, "] Quality assessment:", quality_check$reason))
-    }
-  }
+  # CRITICAL: Quality filtering moved to earlier stage - no post-processing needed
+  # Quality check is now applied before mapping to prevent contamination
   
   # Create network data frame
   network_data <- data.frame(
