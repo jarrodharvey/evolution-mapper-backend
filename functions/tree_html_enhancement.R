@@ -192,7 +192,9 @@ enhance_tree_html_with_info_panels <- function(tree_html, network_data) {
           if (!textElement.empty()) {
             try {
               // Position (i) symbol ABOVE the node text, not to the right
-              var iconY = -20; // Position above the node
+              // Check if this node will have a PhyloPic (taxonomic node)
+              var hasPhyloPic = phylopicNodeData && phylopicNodeData[nodeName.replace(/\\s*\\([^)]*\\)\\s*$/, "")];
+              var iconY = hasPhyloPic ? -50 : -20; // Higher position for PhyloPic nodes
               
               // Add ONLY the (i) text symbol - NO white circle background
               var infoIcon = node.append("text")
@@ -324,13 +326,14 @@ enhance_tree_html_with_info_panels <- function(tree_html, network_data) {
   return(tree_html)
 }
 
-#' Enhance tree HTML with info panel system using cached data (no duplicate API calls)
+#' Enhance tree HTML with info panel system and PhyloPic node replacement using cached data
 #' @param tree_html HTML string from collapsibleTreeNetwork
 #' @param network_data Network data with node information
 #' @param cached_info_panels Pre-generated info panel data from create_info_panel_data_parallel()
 #' @param expansion_speed Duration in milliseconds for tree expansion animations (default: 750)
-#' @return Enhanced HTML with CSS and JavaScript for info panel system
-enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, cached_info_panels, expansion_speed = 750) {
+#' @param enable_phylopic_nodes Enable PhyloPic replacement for taxonomic nodes (default: TRUE)
+#' @return Enhanced HTML with CSS and JavaScript for info panel system and PhyloPic nodes
+enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, cached_info_panels, expansion_speed = 750, enable_phylopic_nodes = TRUE) {
   
   # Add layout CSS and info panel CSS
   layout_css <- "<style>body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; } html { margin: 0 !important; padding: 0 !important; } #htmlwidget_container { margin: 0 !important; padding: 0 !important; }</style>"
@@ -345,10 +348,129 @@ enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, c
   # Create JavaScript data structure using cached info panel data (no API calls)
   info_panel_data_js <- create_info_panel_data_js_with_cache(network_data, cached_info_panels)
   
+  # Generate PhyloPic node replacement data if enabled
+  phylopic_node_data_js <- "{}"  # Default empty object
+  if (enable_phylopic_nodes) {
+    tryCatch({
+      phylopic_node_data_js <- create_phylopic_node_replacement_data(network_data)
+    }, error = function(e) {
+      api_log_warn(paste("Failed to create PhyloPic node replacement data:", e$message))
+      phylopic_node_data_js <- "{}"  # Fall back to empty object
+    })
+  }
+  
   # Add info panel system to the tree with proper event delegation
   info_panel_script <- paste0('<script>
   // Info panel data mapping (base64 encoded to avoid escaping issues)
   var infoPanelDataEncoded = ', info_panel_data_js, ';
+  
+  // PhyloPic node replacement data
+  var phylopicNodeData = ', phylopic_node_data_js, ';
+  
+  // Function to replace taxonomic nodes with PhyloPic silhouettes
+  function replacePhylopicNodes() {
+    console.log("=== PHYLOPIC NODE REPLACEMENT START ===");
+    console.log("Available PhyloPic data:", Object.keys(phylopicNodeData));
+    
+    // Find taxonomic nodes using same logic as info panel system (reuses successful node identification)
+    var taxonomicNodes = [];
+    var nodeSelection = d3.selectAll(".collapsibleTree .node");
+    console.log("PhyloPic node selection size:", nodeSelection.size());
+    nodeSelection.each(function() {
+      var node = d3.select(this);
+      var nodeData = node.datum();
+      var nodeName = nodeData && nodeData.data ? nodeData.data.name : null;
+      
+      console.log("PhyloPic checking node:", nodeName, "NodeData exists:", !!nodeData);
+      
+      if (!nodeName) return;
+      
+      // Extract taxonomic name from age format like "Tetrapoda (123 Mya)"
+      var taxonomicName = nodeName;
+      var matches = nodeName.match(/^([^(]+)\\\\s*\\\\(/);
+      if (matches && matches[1]) {
+        taxonomicName = matches[1].trim();
+      }
+      
+      console.log("  - Original name:", nodeName, "Extracted name:", taxonomicName);
+      console.log("  - Has PhyloPic data:", !!(phylopicNodeData[taxonomicName] && phylopicNodeData[taxonomicName].data_url));
+      
+      // Only include nodes that have PhyloPic data available (same as info panel condition)
+      if (phylopicNodeData[taxonomicName] && phylopicNodeData[taxonomicName].data_url) {
+        var circle = node.select("circle");
+        console.log("  - Has circle element:", !circle.empty());
+        if (!circle.empty()) {
+          console.log("  - ADDING TO REPLACEMENT LIST:", nodeName);
+          taxonomicNodes.push({
+            node: node,
+            circle: circle,
+            nodeName: nodeName,
+            taxonomicName: taxonomicName
+          });
+        }
+      }
+    });
+    console.log("Found", taxonomicNodes.length, "taxonomic nodes to potentially replace");
+    
+    taxonomicNodes.forEach(function(nodeInfo) {
+      var node = nodeInfo.node;
+      var circle = nodeInfo.circle;
+      var nodeName = nodeInfo.nodeName;
+      var taxonomicName = nodeInfo.taxonomicName;
+      
+      console.log("Processing taxonomic node:", nodeName, "-> extracted name:", taxonomicName);
+      
+      // Check if we have PhyloPic data for this taxonomic group
+      var phylopicData = phylopicNodeData[taxonomicName];
+      if (phylopicData && phylopicData.data_url) {
+        console.log("Replacing node with PhyloPic:", taxonomicName);
+        
+        try {
+          // Get circle and text properties for positioning
+          var circleR = parseFloat(circle.attr("r")) || 4.5;
+          var circleX = parseFloat(circle.attr("cx")) || 0;
+          var circleY = parseFloat(circle.attr("cy")) || 0;
+          
+          // Calculate image size (slightly larger than original circle)
+          var imageSize = Math.max(phylopicData.target_size || 35, circleR * 2.2);
+          
+          // Position PhyloPic slightly to the right of the original circle position
+          // This avoids getBBox() calculation issues with CollapsibleTree
+          var phylopicX = circleX - circleR; // Positioned at left edge of circle
+          var phylopicY = circleY - imageSize / 2; // Centered on circle
+          
+          // Hide the original circle instead of removing it (preserve functionality)
+          circle.style("opacity", 0);
+          
+          // Add PhyloPic image positioned to avoid text overlap
+          var image = node.append("image")
+            .attr("class", "phylopic-node-image")
+            .attr("xlink:href", phylopicData.data_url)
+            .attr("x", phylopicX)
+            .attr("y", phylopicY)
+            .attr("width", imageSize)
+            .attr("height", imageSize)
+            .style("cursor", "pointer")
+            .style("opacity", 0.9)
+            .attr("title", "PhyloPic silhouette for " + taxonomicName);
+          
+          // Store original circle reference for potential restoration
+          image.node()._originalCircle = circle.node();
+          
+          console.log("Successfully replaced", taxonomicName, "with PhyloPic silhouette");
+          
+        } catch (e) {
+          console.error("Error replacing node", taxonomicName, "with PhyloPic:", e);
+          // Ensure circle remains visible if replacement fails
+          circle.style("opacity", 1);
+        }
+      } else {
+        console.log("No PhyloPic data available for:", taxonomicName);
+      }
+    });
+    
+    console.log("=== PHYLOPIC NODE REPLACEMENT END ===");
+  }
   
   // Decode base64 data with proper UTF-8 handling
   var infoPanelData = {};
@@ -375,6 +497,7 @@ enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, c
   setTimeout(function() {
     console.log("=== INFO PANEL DEBUG START ===");
     console.log("Info panel data keys:", Object.keys(infoPanelData));
+    console.log("PhyloPic node data keys:", Object.keys(phylopicNodeData));
     console.log("Available nodes:", d3.selectAll(".collapsibleTree .node").size());
     
     // Remove existing tooltips
@@ -414,7 +537,9 @@ enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, c
           if (!textElement.empty()) {
             try {
               // Position (i) symbol ABOVE the node text, not to the right
-              var iconY = -20; // Position above the node
+              // Check if this node will have a PhyloPic (taxonomic node)
+              var hasPhyloPic = phylopicNodeData && phylopicNodeData[nodeName.replace(/\\s*\\([^)]*\\)\\s*$/, "")];
+              var iconY = hasPhyloPic ? -50 : -20; // Higher position for PhyloPic nodes
               
               // Add ONLY the (i) text symbol - NO white circle background
               var infoIcon = node.append("text")
@@ -445,6 +570,11 @@ enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, c
     
     // Add info icons initially
     addInfoIcons();
+    
+    // Replace taxonomic nodes with PhyloPic silhouettes
+    if (Object.keys(phylopicNodeData).length > 0) {
+      replacePhylopicNodes();
+    }
     
     // Set up direct click handlers for each info icon (better than delegation)
     function setupIconClickHandlers() {
@@ -482,6 +612,10 @@ enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, c
           setTimeout(function() {
             addInfoIcons();
             setupIconClickHandlers(); // Re-setup click handlers for new icons
+            // Re-apply PhyloPic replacements to new nodes
+            if (Object.keys(phylopicNodeData).length > 0) {
+              replacePhylopicNodes();
+            }
           }, 100); // Small delay to ensure nodes are fully rendered
         }
       });
@@ -543,14 +677,16 @@ enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, c
   return(tree_html)
 }
 
-#' Complete workflow to enhance collapsibleTreeNetwork with info panels
+#' Complete workflow to enhance collapsibleTreeNetwork with info panels and PhyloPic nodes
 #' @param tree_data Data frame with Parent, Child columns (should already have InfoPanel data)
 #' @param network_data Network data with node information (for debugging)
 #' @param tree_widget collapsibleTreeNetwork widget created with InfoPanel data
 #' @param request_id Optional request ID for logging correlation
 #' @param progress_token Optional progress token for tracking external API calls
-#' @return Enhanced HTML with info panel system
-create_enhanced_tree_html <- function(tree_data, network_data, tree_widget, request_id = NULL, progress_token = NULL, expansion_speed = 750) {
+#' @param expansion_speed Duration in milliseconds for tree expansion animations (default: 750)
+#' @param enable_phylopic_nodes Enable PhyloPic replacement for taxonomic nodes (default: TRUE)
+#' @return Enhanced HTML with info panel system and PhyloPic nodes
+create_enhanced_tree_html <- function(tree_data, network_data, tree_widget, request_id = NULL, progress_token = NULL, expansion_speed = 750, enable_phylopic_nodes = TRUE) {
   
   # Convert to HTML using temporary file approach
   temp_file <- tempfile(fileext = ".html")
@@ -561,8 +697,8 @@ create_enhanced_tree_html <- function(tree_data, network_data, tree_widget, requ
   # Generate cached info panel data ONCE using sequential processing (prevents API hangs)
   cached_info_panels <- create_info_panel_data_sequential(network_data, request_id = request_id, progress_token = progress_token)
   
-  # Enhance HTML with info panel system using cached data
-  enhanced_html <- enhance_tree_html_with_info_panels_cached(tree_html, network_data, cached_info_panels, expansion_speed)
+  # Enhance HTML with info panel system and PhyloPic nodes using cached data
+  enhanced_html <- enhance_tree_html_with_info_panels_cached(tree_html, network_data, cached_info_panels, expansion_speed, enable_phylopic_nodes)
   
   return(enhanced_html)
 }
