@@ -213,13 +213,17 @@ test_phylopic_connection <- function() {
 }
 
 # Get PhyloPic silhouette data formatted for inline SVG replacement
-get_silhouette_for_node_replacement <- function(taxonomic_name, target_size = 35) {
+get_silhouette_for_node_replacement <- function(taxonomic_name, target_size = 35, use_cache = TRUE) {
   if (is.null(taxonomic_name) || is.na(taxonomic_name) || taxonomic_name == "") {
     return(list(success = FALSE, error = "No taxonomic name provided"))
   }
   
-  # Get a random UUID for this taxonomic group
-  uuid <- get_random_silhouette_uuid(taxonomic_name)
+  # Get a random UUID for this taxonomic group using cached function if available
+  if (use_cache && exists("cached_get_random_silhouette_uuid", mode = "function")) {
+    uuid <- cached_get_random_silhouette_uuid(taxonomic_name)
+  } else {
+    uuid <- get_random_silhouette_uuid(taxonomic_name)
+  }
   
   if (is.null(uuid)) {
     return(list(success = FALSE, error = "No silhouettes found"))
@@ -266,6 +270,16 @@ create_phylopic_node_replacement_data <- function(network_data, request_id = NUL
     request_id <- "phylopic_nodes"
   }
   
+  # Load cached API functions if available for better performance
+  tryCatch({
+    source("functions/cached_api_functions.R", local = TRUE)
+    api_log_info(paste("[", request_id, "] Using cached PhyloPic functions for improved performance"))
+    use_cache <- TRUE
+  }, error = function(e) {
+    api_log_warn(paste("[", request_id, "] Could not load cached functions, using direct API calls:", e$message))
+    use_cache <- FALSE
+  })
+  
   api_log_info(paste("[", request_id, "] Creating PhyloPic node replacement data...", sep=""))
   
   # Identify taxonomic nodes that need PhyloPic replacement
@@ -286,8 +300,8 @@ create_phylopic_node_replacement_data <- function(network_data, request_id = NUL
           
           api_log_info(paste("[", request_id, "] Fetching PhyloPic for taxonomic node:", taxonomic_name))
           
-          # Get PhyloPic data optimized for node replacement
-          phylopic_result <- get_silhouette_for_node_replacement(taxonomic_name, target_size = 35)
+          # Get PhyloPic data optimized for node replacement with caching
+          phylopic_result <- get_silhouette_for_node_replacement(taxonomic_name, target_size = 35, use_cache = use_cache)
           
           if (phylopic_result$success) {
             taxonomic_nodes[[taxonomic_name]] <- list(
