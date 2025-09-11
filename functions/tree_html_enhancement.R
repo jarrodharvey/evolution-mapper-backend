@@ -191,16 +191,20 @@ enhance_tree_html_with_info_panels <- function(tree_html, network_data) {
           var textElement = node.select("text");
           if (!textElement.empty()) {
             try {
-              // Position (i) symbol ABOVE the node text, not to the right
+              // Position (i) symbol ABOVE the text label, not above the node center
+              // Get the text element position and dimensions
+              var textX = parseFloat(textElement.attr("x")) || 0;
+              var textY = parseFloat(textElement.attr("y")) || 0;
+              
               // Check if this node will have a PhyloPic (taxonomic node)
               var hasPhyloPic = phylopicNodeData && phylopicNodeData[nodeName.replace(/\\s*\\([^)]*\\)\\s*$/, "")];
-              var iconY = hasPhyloPic ? -50 : -20; // Higher position for PhyloPic nodes
+              var iconOffsetY = hasPhyloPic ? -35 : -15; // Offset above text (smaller values since we are positioning relative to text)
               
               // Add ONLY the (i) text symbol - NO white circle background
               var infoIcon = node.append("text")
                 .attr("class", "info-icon-text")
-                .attr("x", 0) // Center horizontally with the node
-                .attr("y", iconY)
+                .attr("x", textX - 25) // Position to the left of the text to avoid PhyloPic overlap
+                .attr("y", textY + iconOffsetY) // Position above the text label
                 .attr("dy", "0.35em")
                 .attr("text-anchor", "middle")
                 .attr("fill", "#3498db") // Blue color for visibility
@@ -536,16 +540,20 @@ enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, c
           var textElement = node.select("text");
           if (!textElement.empty()) {
             try {
-              // Position (i) symbol ABOVE the node text, not to the right
+              // Position (i) symbol ABOVE the text label, not above the node center
+              // Get the text element position and dimensions
+              var textX = parseFloat(textElement.attr("x")) || 0;
+              var textY = parseFloat(textElement.attr("y")) || 0;
+              
               // Check if this node will have a PhyloPic (taxonomic node)
               var hasPhyloPic = phylopicNodeData && phylopicNodeData[nodeName.replace(/\\s*\\([^)]*\\)\\s*$/, "")];
-              var iconY = hasPhyloPic ? -50 : -20; // Higher position for PhyloPic nodes
+              var iconOffsetY = hasPhyloPic ? -35 : -15; // Offset above text (smaller values since we are positioning relative to text)
               
               // Add ONLY the (i) text symbol - NO white circle background
               var infoIcon = node.append("text")
                 .attr("class", "info-icon-text")
-                .attr("x", 0) // Center horizontally with the node
-                .attr("y", iconY)
+                .attr("x", textX - 25) // Position to the left of the text to avoid PhyloPic overlap
+                .attr("y", textY + iconOffsetY) // Position above the text label
                 .attr("dy", "0.35em")
                 .attr("text-anchor", "middle")
                 .attr("fill", "#3498db") // Blue color for visibility
