@@ -1499,12 +1499,24 @@ create_hybrid_tree_visualization <- function(network_data, request_id = NULL, pr
     request_id <- "viz_create"
   }
   
+  # Helper function to update progress if token provided
+  update_progress_internal <- function(step_name, status = "completed", additional_data = NULL) {
+    if (!is.null(progress_token) && progress_token != "") {
+      update_progress(progress_token, step_name, status, additional_data)
+    }
+  }
+  
   api_log_info(paste("[", request_id, "] Starting hybrid tree visualization creation...", sep=""))
   
-  # Calculate dynamic link length with extra space for age information
+  # Step 5.1: Calculate dynamic link lengths
+  update_progress_internal("calculating_link_lengths", "in_progress", 
+                         list(step = "Calculating dynamic link lengths for tree layout"))
   link_length <- calculate_dynamic_link_length_hybrid(network_data)
+  update_progress_internal("calculating_link_lengths", "completed")
   
-  # Prepare data for collapsibleTreeNetwork
+  # Step 5.2: Prepare tree structure data
+  update_progress_internal("preparing_tree_structure", "in_progress", 
+                         list(step = "Preparing tree structure and color mapping"))
   tree_data <- data.frame(
     Parent = network_data$from,
     Child = network_data$to,
@@ -1520,8 +1532,11 @@ create_hybrid_tree_visualization <- function(network_data, request_id = NULL, pr
     
     get_node_color(node_type, has_age)
   })
+  update_progress_internal("preparing_tree_structure", "completed")
   
-  # Create collapsibleTree with color mapping and expansion settings
+  # Step 5.3: Create base tree widget
+  update_progress_internal("creating_base_widget", "in_progress", 
+                         list(step = "Creating collapsibleTree widget with interactions"))
   tree_widget <- collapsibleTreeNetwork(
     tree_data,
     attribute = "NodeType",
@@ -1534,9 +1549,12 @@ create_hybrid_tree_visualization <- function(network_data, request_id = NULL, pr
     zoomable = TRUE,
     collapsed = TRUE  # Start collapsed, will expand all with custom speed
   )
+  update_progress_internal("creating_base_widget", "completed")
   
-  # Override transition durations and expand all nodes using htmlwidgets::onRender
+  # Step 5.4: Apply JavaScript enhancements for expansion behavior
   if (expansion_speed != 750) {
+    update_progress_internal("applying_js_enhancements", "in_progress", 
+                           list(step = "Applying JavaScript enhancements for tree expansion"))
     tree_widget <- tree_widget %>%
       htmlwidgets::onRender(paste0("
         function(el, x) {
@@ -1622,17 +1640,27 @@ create_hybrid_tree_visualization <- function(network_data, request_id = NULL, pr
           }, 500);
         }
       "))
+    update_progress_internal("applying_js_enhancements", "completed")
   }
   
-  # Transform network data to info panel format
+  # Step 5.5: Transform network data for info panels
+  update_progress_internal("transforming_network_data", "in_progress", 
+                         list(step = "Transforming network data to info panel format"))
   info_panel_network_data <- transform_hybrid_to_info_panel_format(network_data)
+  update_progress_internal("transforming_network_data", "completed")
   
-  # Add info panel data to tree_data with sequential processing and progress tracking
+  # Step 5.6: Generate info panel data (Wikipedia & PhyloPic content)
+  update_progress_internal("generating_info_panels", "in_progress", 
+                         list(step = "Generating info panels with Wikipedia and PhyloPic data"))
   tree_data <- add_info_panel_data(tree_data, info_panel_network_data, request_id, progress_token)
+  update_progress_internal("generating_info_panels", "completed")
   
-  # Use enhanced tree HTML generation with info panels and progress tracking
+  # Step 5.7: Generate final enhanced HTML
+  update_progress_internal("generating_final_html", "in_progress", 
+                         list(step = "Generating final enhanced HTML with interactive features"))
   tree_html <- create_enhanced_tree_html(tree_data, info_panel_network_data, tree_widget, request_id, progress_token, expansion_speed)
+  update_progress_internal("generating_final_html", "completed")
   
-  
+  api_log_info(paste("[", request_id, "] Hybrid tree visualization creation completed", sep=""))
   return(tree_html)
 }
