@@ -5,6 +5,9 @@
 # Source Wikipedia API functions
 source("functions/wikipedia_api.R")
 
+# Source Wikipedia image API functions
+source("functions/wikipedia_images.R")
+
 # Source PhyloPic silhouette functions
 source("functions/phylopic_silhouettes.R")
 
@@ -199,15 +202,27 @@ has_extractable_taxonomic_name <- function(node_data) {
   return(FALSE)
 }
 
-# Format combined silhouette and Wikipedia section side by side
+# Format combined image (Wikipedia image prioritized, PhyloPic fallback) and Wikipedia text section
 format_combined_taxonomic_section <- function(node_data) {
+  # Check for Wikipedia image (primary choice)
+  has_wikipedia_image <- !is.null(node_data$wikipedia_image_html) && 
+                         !is.na(node_data$wikipedia_image_html) && 
+                         nchar(as.character(node_data$wikipedia_image_html)) > 0
+  
+  # Check for PhyloPic silhouette (fallback choice)
   has_silhouette <- !is.null(node_data$silhouette_html) && 
                     !is.na(node_data$silhouette_html) && 
                     nchar(as.character(node_data$silhouette_html)) > 0
   
+  # Check for Wikipedia text content
   has_wikipedia <- !is.null(node_data$wikipedia_summary) && 
                    !is.na(node_data$wikipedia_summary) && 
                    nchar(as.character(node_data$wikipedia_summary)) > 0
+  
+  # Check for errors
+  has_wikipedia_image_error <- !is.null(node_data$wikipedia_image_error) && 
+                               !is.na(node_data$wikipedia_image_error) && 
+                               nchar(as.character(node_data$wikipedia_image_error)) > 0
   
   has_silhouette_error <- !is.null(node_data$silhouette_error) && 
                          !is.na(node_data$silhouette_error) && 
@@ -217,27 +232,49 @@ format_combined_taxonomic_section <- function(node_data) {
                         !is.na(node_data$wikipedia_error) && 
                         nchar(as.character(node_data$wikipedia_error)) > 0
   
-  # Show section if we have data OR errors to display
-  if (!has_silhouette && !has_wikipedia && !has_silhouette_error && !has_wikipedia_error) {
+  # Show section if we have any data OR errors to display
+  if (!has_wikipedia_image && !has_silhouette && !has_wikipedia && 
+      !has_wikipedia_image_error && !has_silhouette_error && !has_wikipedia_error) {
     return("")
   }
   
   # Start the combined section
   combined_html <- '<div class="taxonomic-combined-section">'
   
-  # Prepare silhouette content (data or error)
-  silhouette_content <- ""
-  if (has_silhouette) {
-    silhouette_content <- node_data$silhouette_html
+  # Prioritize Wikipedia image, fallback to PhyloPic silhouette
+  image_content <- ""
+  if (has_wikipedia_image) {
+    # Use Wikipedia image (highest priority)
+    image_content <- node_data$wikipedia_image_html
+  } else if (has_silhouette) {
+    # Fallback to PhyloPic silhouette
+    image_content <- node_data$silhouette_html
+  } else if (has_wikipedia_image_error && has_silhouette_error) {
+    # Both image sources failed - show combined error
+    image_content <- paste0(
+      '<div class="image-error" style="color: #e74c3c; font-size: 12px; font-style: italic; padding: 8px; border: 1px solid #e74c3c; border-radius: 4px; background-color: #fdf2f2;">',
+      '⚠️ No images available<br>',
+      'Wikipedia: ', node_data$wikipedia_image_error, '<br>',
+      'PhyloPic: ', node_data$silhouette_error,
+      '</div>'
+    )
+  } else if (has_wikipedia_image_error) {
+    # Wikipedia image failed, no PhyloPic attempted or available
+    image_content <- paste0(
+      '<div class="image-error" style="color: #e74c3c; font-size: 12px; font-style: italic; padding: 8px; border: 1px solid #e74c3c; border-radius: 4px; background-color: #fdf2f2;">',
+      '⚠️ ', node_data$wikipedia_image_error,
+      '</div>'
+    )
   } else if (has_silhouette_error) {
-    silhouette_content <- paste0(
-      '<div class="silhouette-error" style="color: #e74c3c; font-size: 12px; font-style: italic; padding: 8px; border: 1px solid #e74c3c; border-radius: 4px; background-color: #fdf2f2;">',
+    # PhyloPic failed, no Wikipedia image attempted or available
+    image_content <- paste0(
+      '<div class="image-error" style="color: #e74c3c; font-size: 12px; font-style: italic; padding: 8px; border: 1px solid #e74c3c; border-radius: 4px; background-color: #fdf2f2;">',
       '⚠️ ', node_data$silhouette_error,
       '</div>'
     )
   }
   
-  # Prepare Wikipedia content (data or error)  
+  # Prepare Wikipedia text content (data or error)  
   wikipedia_content <- ""
   if (has_wikipedia) {
     wikipedia_content <- format_wikipedia_content(node_data)
@@ -250,25 +287,28 @@ format_combined_taxonomic_section <- function(node_data) {
   }
   
   # Combine content based on what we have
-  if ((has_silhouette || has_silhouette_error) && (has_wikipedia || has_wikipedia_error)) {
-    # Both sections - silhouette floated left with text wrapping
+  has_any_image <- has_wikipedia_image || has_silhouette || has_wikipedia_image_error || has_silhouette_error
+  has_any_text <- has_wikipedia || has_wikipedia_error
+  
+  if (has_any_image && has_any_text) {
+    # Both image and text - image floated left with text wrapping
     combined_html <- paste0(combined_html,
       '<div class="taxonomic-wrapped-container">',
-      '<div class="silhouette-float">',
-      silhouette_content,
+      '<div class="image-float">',
+      image_content,
       '</div>',
       wikipedia_content,
       '</div>'
     )
-  } else if (has_silhouette || has_silhouette_error) {
-    # Only silhouette (data or error)
+  } else if (has_any_image) {
+    # Only image (data or error)
     combined_html <- paste0(combined_html,
-      '<div class="silhouette-only">',
-      silhouette_content,
+      '<div class="image-only">',
+      image_content,
       '</div>'
     )
-  } else if (has_wikipedia || has_wikipedia_error) {
-    # Only Wikipedia (data or error)
+  } else if (has_any_text) {
+    # Only Wikipedia text (data or error)
     combined_html <- paste0(combined_html,
       '<div class="wikipedia-only">',
       wikipedia_content,
@@ -633,6 +673,52 @@ generate_info_panel_css <- function() {
   text-decoration: underline;
 }
 
+/* Wikipedia image styles */
+.wikipedia-image-section {
+  margin: 0;
+  padding: 0;
+}
+
+.wikipedia-image-container {
+  margin: 8px 0;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 4px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 60px;
+  width: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.wikipedia-taxonomic-image {
+  max-width: 90px;
+  max-height: 90px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 3px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  display: block;
+  margin: 0 auto;
+}
+
+/* Floating Wikipedia images in combined layout */
+.image-float {
+  float: left;
+  width: 100px;
+  margin-right: 12px;
+  margin-bottom: 8px;
+}
+
+.image-float .wikipedia-image-container,
+.image-float .silhouette-container {
+  margin: 0;
+  height: 70px;
+}
+
 .close-panel {
   position: absolute;
   top: 4px;
@@ -910,7 +996,9 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
     api_log_info(paste("[", request_id, "] Processing", length(taxonomic_indices), "taxonomic nodes sequentially (PhyloPic → Wikipedia → PhyloPic → Wikipedia...)"))
     
     wikipedia_successes <- 0
+    wikipedia_image_successes <- 0
     phylopic_successes <- 0
+    wikipedia_image_errors <- c()
     phylopic_errors <- c()
     processed_taxonomic_names <- c()
     
@@ -952,42 +1040,82 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
       processed_taxonomic_names <- c(processed_taxonomic_names, taxonomic_name)
       
       wikipedia_success <- FALSE
+      wikipedia_image_success <- FALSE
       phylopic_success <- FALSE
       node_start_time <- Sys.time()
       
-      # 1. PhyloPic API call first (with timeout protection)
-      api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Fetching PhyloPic data for:", taxonomic_name))
-      phylopic_start <- Sys.time()
+      # 1. Wikipedia Image API call first (highest priority)
+      api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Fetching Wikipedia image for:", taxonomic_name))
+      wikipedia_image_start <- Sys.time()
       tryCatch({
-        if (exists("cached_get_silhouette_data")) {
-          silhouette_result <- cached_get_silhouette_data(taxonomic_name)
-          if (silhouette_result$success) {
-            silhouette_html <- format_silhouette_html(silhouette_result)
-            if (!is.null(silhouette_html) && nchar(silhouette_html) > 0) {
-              node_info$silhouette_html <- silhouette_html
-              node_info$silhouette_uuid <- silhouette_result$uuid
-              node_info$silhouette_attribution <- silhouette_result$attribution
-              phylopic_success <- TRUE
-              phylopic_successes <- phylopic_successes + 1
-              api_log_info(paste("[", request_id, "] PhyloPic success for:", taxonomic_name, "(", round(as.numeric(difftime(Sys.time(), phylopic_start, units = "secs")), 3), "s)"))
+        if (exists("cached_get_wikipedia_main_image")) {
+          wikipedia_image_result <- cached_get_wikipedia_main_image(taxonomic_name, target_width = 800)
+          if (wikipedia_image_result$success) {
+            wikipedia_image_html <- format_wikipedia_image_html(wikipedia_image_result)
+            if (!is.null(wikipedia_image_html) && nchar(wikipedia_image_html) > 0) {
+              node_info$wikipedia_image_html <- wikipedia_image_html
+              node_info$wikipedia_image_url <- wikipedia_image_result$image_url
+              node_info$wikipedia_image_attribution <- wikipedia_image_result$attribution
+              wikipedia_image_success <- TRUE
+              wikipedia_image_successes <- wikipedia_image_successes + 1
+              api_log_info(paste("[", request_id, "] Wikipedia image success for:", taxonomic_name, "(", round(as.numeric(difftime(Sys.time(), wikipedia_image_start, units = "secs")), 3), "s)"))
             } else {
-              node_info$silhouette_error <- "Empty silhouette HTML generated"
-              phylopic_errors <- c(phylopic_errors, paste(taxonomic_name, ": Empty HTML"))
-              api_log_info(paste("[", request_id, "] PhyloPic empty result for:", taxonomic_name))
+              node_info$wikipedia_image_error <- "Empty Wikipedia image HTML generated"
+              wikipedia_image_errors <- c(wikipedia_image_errors, paste(taxonomic_name, ": Empty HTML"))
+              api_log_info(paste("[", request_id, "] Wikipedia image empty result for:", taxonomic_name))
             }
           } else {
-            node_info$silhouette_error <- paste("Silhouette data failed:", silhouette_result$error)
-            phylopic_errors <- c(phylopic_errors, paste(taxonomic_name, ":", silhouette_result$error))
-            api_log_info(paste("[", request_id, "] PhyloPic failed for:", taxonomic_name, "-", silhouette_result$error))
+            node_info$wikipedia_image_error <- paste("Wikipedia image failed:", wikipedia_image_result$error)
+            wikipedia_image_errors <- c(wikipedia_image_errors, paste(taxonomic_name, ":", wikipedia_image_result$error))
+            api_log_info(paste("[", request_id, "] Wikipedia image failed for:", taxonomic_name, "-", wikipedia_image_result$error))
           }
         }
       }, error = function(e) {
-        node_info$silhouette_error <- paste("PhyloPic error:", e$message)
-        phylopic_errors <- c(phylopic_errors, paste(taxonomic_name, ":", e$message))
-        api_log_error(paste("[", request_id, "] PhyloPic error for:", taxonomic_name, "-", e$message))
+        node_info$wikipedia_image_error <- paste("Wikipedia image error:", e$message)
+        wikipedia_image_errors <- c(wikipedia_image_errors, paste(taxonomic_name, ":", e$message))
+        api_log_error(paste("[", request_id, "] Wikipedia image error for:", taxonomic_name, "-", e$message))
       })
       
-      # 2. Wikipedia API call second (natural rate limiting)
+      # 2. PhyloPic API call as fallback (only if Wikipedia image failed)
+      if (!wikipedia_image_success) {
+        api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Fetching PhyloPic data for:", taxonomic_name, "(Wikipedia image unavailable)"))
+      } else {
+        api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Skipping PhyloPic - Wikipedia image available for:", taxonomic_name))
+      }
+      
+      phylopic_start <- Sys.time()
+      if (!wikipedia_image_success) {
+        tryCatch({
+          if (exists("cached_get_silhouette_data")) {
+            silhouette_result <- cached_get_silhouette_data(taxonomic_name)
+            if (silhouette_result$success) {
+              silhouette_html <- format_silhouette_html(silhouette_result)
+              if (!is.null(silhouette_html) && nchar(silhouette_html) > 0) {
+                node_info$silhouette_html <- silhouette_html
+                node_info$silhouette_uuid <- silhouette_result$uuid
+                node_info$silhouette_attribution <- silhouette_result$attribution
+                phylopic_success <- TRUE
+                phylopic_successes <- phylopic_successes + 1
+                api_log_info(paste("[", request_id, "] PhyloPic success for:", taxonomic_name, "(", round(as.numeric(difftime(Sys.time(), phylopic_start, units = "secs")), 3), "s)"))
+              } else {
+                node_info$silhouette_error <- "Empty silhouette HTML generated"
+                phylopic_errors <- c(phylopic_errors, paste(taxonomic_name, ": Empty HTML"))
+                api_log_info(paste("[", request_id, "] PhyloPic empty result for:", taxonomic_name))
+              }
+            } else {
+              node_info$silhouette_error <- paste("Silhouette data failed:", silhouette_result$error)
+              phylopic_errors <- c(phylopic_errors, paste(taxonomic_name, ":", silhouette_result$error))
+              api_log_info(paste("[", request_id, "] PhyloPic failed for:", taxonomic_name, "-", silhouette_result$error))
+            }
+          }
+        }, error = function(e) {
+          node_info$silhouette_error <- paste("PhyloPic error:", e$message)
+          phylopic_errors <- c(phylopic_errors, paste(taxonomic_name, ":", e$message))
+          api_log_error(paste("[", request_id, "] PhyloPic error for:", taxonomic_name, "-", e$message))
+        })
+      }
+      
+      # 3. Wikipedia text API call (natural rate limiting)
       api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Fetching Wikipedia data for:", taxonomic_name))
       wikipedia_start <- Sys.time()
       tryCatch({
@@ -1020,6 +1148,7 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
                                   total_nodes = length(taxonomic_node_info),
                                   current_node = taxonomic_name,
                                   wikipedia_successes = wikipedia_successes,
+                                  wikipedia_image_successes = wikipedia_image_successes,
                                   phylopic_successes = phylopic_successes))
     }
     
@@ -1028,8 +1157,12 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
     
     api_log_info(paste("[", request_id, "] Sequential processing results:", sep=""))
     api_log_info(paste("[", request_id, "]   Taxonomic names processed:", length(processed_taxonomic_names)))
-    api_log_info(paste("[", request_id, "]   Wikipedia successes:", wikipedia_successes, "/", length(processed_taxonomic_names)))
+    api_log_info(paste("[", request_id, "]   Wikipedia text successes:", wikipedia_successes, "/", length(processed_taxonomic_names)))
+    api_log_info(paste("[", request_id, "]   Wikipedia image successes:", wikipedia_image_successes, "/", length(processed_taxonomic_names)))
     api_log_info(paste("[", request_id, "]   PhyloPic successes:", phylopic_successes, "/", length(processed_taxonomic_names)))
+    if (length(wikipedia_image_errors) > 0) {
+      api_log_info(paste("[", request_id, "]   Wikipedia image errors:", paste(head(wikipedia_image_errors, 3), collapse = "; "), if(length(wikipedia_image_errors) > 3) '...' else ''))
+    }
     if (length(phylopic_errors) > 0) {
       api_log_info(paste("[", request_id, "]   PhyloPic errors:", paste(head(phylopic_errors, 3), collapse = "; "), if(length(phylopic_errors) > 3) '...' else ''))
     }
@@ -1042,6 +1175,7 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
     update_progress_internal("taxonomic_data_fetching", "completed", 
                            list(total_processed = length(processed_taxonomic_names),
                                 wikipedia_successes = wikipedia_successes,
+                                wikipedia_image_successes = wikipedia_image_successes,
                                 phylopic_successes = phylopic_successes,
                                 duration_seconds = round(sequential_duration, 3)))
   } else {
@@ -1186,7 +1320,37 @@ add_wikipedia_data <- function(node_info) {
     return(node_info)
   }
   
-  # Try to fetch Wikipedia data using the cached Wikipedia API function
+  # Try to fetch Wikipedia image first (highest priority)
+  tryCatch({
+    # Check if cached wikipedia image API function exists
+    if (exists("cached_get_wikipedia_main_image")) {
+      wikipedia_image_result <- cached_get_wikipedia_main_image(taxonomic_name, target_width = 800)
+      
+      if (wikipedia_image_result$success) {
+        # Add Wikipedia image data to node_info
+        wikipedia_image_html <- format_wikipedia_image_html(wikipedia_image_result)
+        node_info$wikipedia_image_html <- wikipedia_image_html
+        node_info$wikipedia_image_url <- wikipedia_image_result$image_url
+        node_info$wikipedia_image_attribution <- wikipedia_image_result$attribution
+        node_info$wikipedia_image_error <- NULL
+      } else {
+        # Add failure information to show in info panel
+        node_info$wikipedia_image_html <- NULL
+        node_info$wikipedia_image_url <- NULL
+        node_info$wikipedia_image_attribution <- NULL
+        node_info$wikipedia_image_error <- paste("Failed to fetch Wikipedia image:", wikipedia_image_result$error)
+      }
+    }
+  }, error = function(e) {
+    # If there's an error, add error information
+    api_log_warn(paste("Could not fetch Wikipedia image for", taxonomic_name, ":", e$message))
+    node_info$wikipedia_image_html <- NULL
+    node_info$wikipedia_image_url <- NULL
+    node_info$wikipedia_image_attribution <- NULL
+    node_info$wikipedia_image_error <- paste("Failed to connect to Wikipedia Image API:", e$message)
+  })
+
+  # Try to fetch Wikipedia text data using the cached Wikipedia API function
   tryCatch({
     # Check if cached wikipedia API function exists
     if (exists("cached_get_wikipedia_intro")) {
@@ -1215,35 +1379,37 @@ add_wikipedia_data <- function(node_info) {
     node_info$wikipedia_error <- paste("Failed to connect to Wikipedia API:", e$message)
   })
   
-  # Try to fetch silhouette data using cached PhyloPic function
-  tryCatch({
-    # Check if cached phylopic function exists
-    if (exists("cached_get_silhouette_data")) {
-      silhouette_result <- cached_get_silhouette_data(taxonomic_name)
-      
-      if (silhouette_result$success) {
-        # Format the silhouette HTML and add to node_info
-        silhouette_html <- format_silhouette_html(silhouette_result)
-        node_info$silhouette_html <- silhouette_html
-        node_info$silhouette_uuid <- silhouette_result$uuid
-        node_info$silhouette_attribution <- silhouette_result$attribution
-        node_info$silhouette_error <- NULL
-      } else {
-        # Add failure information to show in info panel
-        node_info$silhouette_html <- NULL
-        node_info$silhouette_uuid <- NULL
-        node_info$silhouette_attribution <- NULL
-        node_info$silhouette_error <- paste("Failed to fetch silhouette:", silhouette_result$error)
+  # Try to fetch silhouette data using cached PhyloPic function (only if Wikipedia image failed)
+  if (is.null(node_info$wikipedia_image_html) || is.na(node_info$wikipedia_image_html) || nchar(as.character(node_info$wikipedia_image_html)) == 0) {
+    tryCatch({
+      # Check if cached phylopic function exists
+      if (exists("cached_get_silhouette_data")) {
+        silhouette_result <- cached_get_silhouette_data(taxonomic_name)
+        
+        if (silhouette_result$success) {
+          # Format the silhouette HTML and add to node_info
+          silhouette_html <- format_silhouette_html(silhouette_result)
+          node_info$silhouette_html <- silhouette_html
+          node_info$silhouette_uuid <- silhouette_result$uuid
+          node_info$silhouette_attribution <- silhouette_result$attribution
+          node_info$silhouette_error <- NULL
+        } else {
+          # Add failure information to show in info panel
+          node_info$silhouette_html <- NULL
+          node_info$silhouette_uuid <- NULL
+          node_info$silhouette_attribution <- NULL
+          node_info$silhouette_error <- paste("Failed to fetch silhouette:", silhouette_result$error)
+        }
       }
-    }
-  }, error = function(e) {
-    # If there's an error, add error information
-    api_log_warn(paste("Could not fetch silhouette data for", taxonomic_name, ":", e$message))
-    node_info$silhouette_html <- NULL
-    node_info$silhouette_uuid <- NULL
-    node_info$silhouette_attribution <- NULL
-    node_info$silhouette_error <- paste("Failed to connect to PhyloPic API:", e$message)
-  })
+    }, error = function(e) {
+      # If there's an error, add error information
+      api_log_warn(paste("Could not fetch silhouette data for", taxonomic_name, ":", e$message))
+      node_info$silhouette_html <- NULL
+      node_info$silhouette_uuid <- NULL
+      node_info$silhouette_attribution <- NULL
+      node_info$silhouette_error <- paste("Failed to connect to PhyloPic API:", e$message)
+    })
+  }
   
   return(node_info)
 }
