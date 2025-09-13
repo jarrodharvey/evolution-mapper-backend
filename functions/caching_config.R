@@ -36,9 +36,17 @@ wikipedia_images_cache <- cache_disk(
   max_age = 30 * 24 * 60 * 60  # 30 days (images change rarely)
 )
 
+# Unsplash image cache - separate cache for Unsplash API calls
+unsplash_images_cache <- cache_disk(
+  dir = "cache/unsplash_images/",
+  max_size = 400 * 1024^2,  # 400MB (images are larger than text content)
+  max_age = 30 * 24 * 60 * 60  # 30 days (images change rarely)
+)
+
 api_log_info("Caching configuration loaded successfully")
 api_log_info(paste("Cache directories:"))
 api_log_info(paste("  Info panels:", file.path(getwd(), "cache/info_panels/")))
 api_log_info(paste("  Wikipedia:", file.path(getwd(), "cache/wikipedia/")))
 api_log_info(paste("  PhyloPic:", file.path(getwd(), "cache/phylopic/")))
 api_log_info(paste("  Wikipedia Images:", file.path(getwd(), "cache/wikipedia_images/")))
+api_log_info(paste("  Unsplash Images:", file.path(getwd(), "cache/unsplash_images/")))
