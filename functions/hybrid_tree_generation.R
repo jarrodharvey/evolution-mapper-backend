@@ -1233,17 +1233,44 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
   # Function to get node label with age information
   get_node_label_with_age <- function(node_num, node_type) {
     if (node_num <= n_tips) {
-      # Species node - use user-provided common name
+      # Tip node - could be species or mrcaott (taxonomic)
       tip_label <- phylo_tree$tip.label[node_num]
-      tip_clean <- gsub("_ott\\d+", "", tip_label)
-      tip_clean <- gsub("_", " ", tip_clean)
       
-      match_idx <- which(species_data$scientific == tip_clean)
-      if (length(match_idx) > 0) {
-        common_name <- species_data$common[match_idx[1]]
-        return(common_name)  # Species never need age labels - just show the name
+      # Check if this is a mrcaott node that should be mapped back to original species
+      if (grepl("^[Mm]rcaott\\d+ott\\d+", tip_label)) {
+        # This is a mrcaott that represents a species/taxon that ROTL collapsed
+        # We need to find which original species this corresponds to by position
+        # Since tip order in phylo_tree matches the order of valid_species
+        if (node_num <= length(species_data$common)) {
+          common_name <- species_data$common[node_num]
+          age_result <- get_age_info(node_num, node_type)
+          if (age_result$has_age) {
+            return(paste0(common_name, " (", age_result$info, ")"))
+          } else {
+            return(common_name)
+          }
+        } else {
+          # Fallback to readable name if we can't map it
+          readable_name <- convert_to_readable_name(tip_label)
+          age_result <- get_age_info(node_num, node_type)
+          if (age_result$has_age) {
+            return(paste0(readable_name, " (", age_result$info, ")"))
+          } else {
+            return(readable_name)
+          }
+        }
+      } else {
+        # Regular species node - use user-provided common name
+        tip_clean <- gsub("_ott\\d+", "", tip_label)
+        tip_clean <- gsub("_", " ", tip_clean)
+        
+        match_idx <- which(species_data$scientific == tip_clean)
+        if (length(match_idx) > 0) {
+          common_name <- species_data$common[match_idx[1]]
+          return(common_name)  # Species never need age labels - just show the name
+        }
+        return(gsub("_", " ", tip_clean))
       }
-      return(gsub("_", " ", tip_clean))
     } else {
       # Internal node
       internal_index <- node_num - n_tips
@@ -1285,7 +1312,11 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
   
   for (node_num in all_node_nums) {
     # Determine node type
-    node_type <- if (node_num <= n_tips) "species" else {
+    node_type <- if (node_num <= n_tips) {
+      # All tip nodes (leaf nodes) should be treated as species regardless of taxonomic level
+      # This ensures they get green coloring like other leaf nodes
+      "species"
+    } else {
       internal_index <- node_num - n_tips
       if (!is.null(phylo_tree$node.label) && 
           length(phylo_tree$node.label) >= internal_index && 

@@ -247,9 +247,15 @@ convert_phylo_to_network <- function(phylo_tree, species_data) {
     
     # Determine child label and type
     if (child_num <= n_tips) {
-      # Child is a tip (species)
-      child_label <- species_data$common[child_num]
-      child_type <- "species"
+      # Child is a tip (species) - check if it's actually a mrcaott node
+      tip_label <- phylo_tree$tip.label[child_num]
+      if (grepl("^[Mm]rcaott\\d+ott\\d+", tip_label)) {
+        child_label <- convert_to_readable_name(tip_label)
+        child_type <- "taxonomic"
+      } else {
+        child_label <- species_data$common[child_num]
+        child_type <- "species"
+      }
     } else {
       # Child is internal node
       internal_index <- child_num - n_tips
@@ -547,13 +553,19 @@ convert_phylo_to_network_paired <- function(phylo_tree, species_data) {
     if (parent_num <= n_tips) {
       # Parent is a tip (shouldn't happen in proper trees)
       tip_label <- phylo_tree$tip.label[parent_num]
-      tip_clean <- gsub("_ott\\d+", "", tip_label)
-      tip_clean <- gsub("_", " ", tip_clean)
-      match_idx <- which(species_data$scientific == tip_clean)
-      if (length(match_idx) > 0) {
-        parent_label <- species_data$common[match_idx[1]]
+      
+      # Check if this is a mrcaott node that should be treated as taxonomic
+      if (grepl("^[Mm]rcaott\\d+ott\\d+", tip_label)) {
+        parent_label <- convert_to_readable_name(tip_label)
       } else {
-        parent_label <- tip_clean
+        tip_clean <- gsub("_ott\\d+", "", tip_label)
+        tip_clean <- gsub("_", " ", tip_clean)
+        match_idx <- which(species_data$scientific == tip_clean)
+        if (length(match_idx) > 0) {
+          parent_label <- species_data$common[match_idx[1]]
+        } else {
+          parent_label <- tip_clean
+        }
       }
     } else {
       # Parent is internal node
@@ -569,17 +581,34 @@ convert_phylo_to_network_paired <- function(phylo_tree, species_data) {
     if (child_num <= n_tips) {
       # Child is a tip (species) - find correct mapping by scientific name
       tip_label <- phylo_tree$tip.label[child_num]
-      tip_clean <- gsub("_ott\\d+", "", tip_label)
-      tip_clean <- gsub("_", " ", tip_clean)
       
-      # Find matching species in species_data by scientific name
-      match_idx <- which(species_data$scientific == tip_clean)
-      if (length(match_idx) > 0) {
-        child_label <- species_data$common[match_idx[1]]
+      # Check if this is a mrcaott node that ROTL collapsed from an original species
+      if (grepl("^[Mm]rcaott\\d+ott\\d+", tip_label)) {
+        # This is a mrcaott that represents a species/taxon that ROTL collapsed
+        # Map it back to the original species name by position
+        if (child_num <= length(species_data$common)) {
+          child_label <- species_data$common[child_num]
+          # All tip nodes (leaf nodes) should be treated as species regardless of taxonomic level
+          # This ensures they get green coloring like other leaf nodes
+          child_type <- "species"
+        } else {
+          # Fallback to readable name if we can't map it
+          child_label <- convert_to_readable_name(tip_label)
+          child_type <- "taxonomic"
+        }
       } else {
-        child_label <- tip_clean  # fallback
+        tip_clean <- gsub("_ott\\d+", "", tip_label)
+        tip_clean <- gsub("_", " ", tip_clean)
+        
+        # Find matching species in species_data by scientific name
+        match_idx <- which(species_data$scientific == tip_clean)
+        if (length(match_idx) > 0) {
+          child_label <- species_data$common[match_idx[1]]
+        } else {
+          child_label <- tip_clean  # fallback
+        }
+        child_type <- "species"
       }
-      child_type <- "species"
     } else {
       # Child is internal node
       internal_index <- child_num - n_tips
