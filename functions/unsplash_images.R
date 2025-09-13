@@ -34,7 +34,7 @@ get_unsplash_random_image <- function(taxonomic_group, target_width = 800) {
     response <- request(api_url) |>
       req_url_query(
         query = search_query,
-        orientation = "landscape",  # Prefer landscape for better panel display
+        orientation = "squarish",   # Prefer squarish for better thumbnail display
         content_filter = "high"     # High quality content filter
       ) |>
       req_headers(

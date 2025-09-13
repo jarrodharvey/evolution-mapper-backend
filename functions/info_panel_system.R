@@ -1125,7 +1125,7 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
       unsplash_image_start <- Sys.time()
       tryCatch({
         if (exists("cached_get_unsplash_random_image")) {
-          unsplash_image_result <- cached_get_unsplash_random_image(taxonomic_name, target_width = 800)
+          unsplash_image_result <- cached_get_unsplash_random_image(taxonomic_name, target_width = 200)
           if (unsplash_image_result$success) {
             unsplash_image_html <- format_unsplash_image_html(unsplash_image_result)
             if (!is.null(unsplash_image_html) && nchar(unsplash_image_html) > 0) {
@@ -1400,7 +1400,7 @@ add_wikipedia_data <- function(node_info) {
   tryCatch({
     # Check if cached unsplash image API function exists
     if (exists("cached_get_unsplash_random_image")) {
-      unsplash_image_result <- cached_get_unsplash_random_image(taxonomic_name, target_width = 800)
+      unsplash_image_result <- cached_get_unsplash_random_image(taxonomic_name, target_width = 200)
 
       if (unsplash_image_result$success) {
         # Add Unsplash image data to node_info
