@@ -431,9 +431,7 @@ generate_info_panel_css <- function() {
 }
 
 .info-panel {
-  position: absolute;
-  top: 25px;
-  left: -200px;
+  position: fixed;
   width: 450px;
   background: white;
   border: 2px solid #3498db;
@@ -442,8 +440,11 @@ generate_info_panel_css <- function() {
   z-index: 1000;
   max-height: 400px;
   overflow-y: auto;
+  /* Position and transform will be set dynamically by JavaScript to center on SVG */
+  /* The transform: translate(-50%, -50%) is key for perfect centering */
 }
 
+/* Legacy positioning classes kept for fallback compatibility */
 .info-panel.position-above {
   top: auto;
   bottom: 25px;
@@ -802,79 +803,110 @@ generate_info_panel_js <- function() {
 function toggleInfoPanel(iconElement) {
   // Close any other open panels first
   closeAllInfoPanels();
-  
+
   // Find and toggle the panel for this icon
   const container = iconElement.parentElement;
   const panel = container.querySelector(".info-panel");
-  
+
   if (panel) {
     panel.style.display = panel.style.display === "none" ? "block" : "none";
-    
+
     // Add click outside listener if panel is now open
     if (panel.style.display === "block") {
       // Position the panel intelligently to avoid viewport cutoff
       positionPanelInViewport(panel, iconElement);
-      
+
+      // Store reference to current panel for scroll/resize handlers
+      window.currentInfoPanel = {panel: panel, iconElement: iconElement};
+
+      // Add scroll and resize listeners to keep panel centered
+      window.addEventListener("scroll", repositionCurrentPanel);
+      window.addEventListener("resize", repositionCurrentPanel);
+
       // Small delay to prevent immediate closing from this click
       setTimeout(() => {
         document.addEventListener("click", handleClickOutside);
       }, 10);
-      
+
       // No need to fetch Wikipedia data - it is already embedded server-side
+    } else {
+      // Panel is being closed, remove scroll/resize listeners
+      window.currentInfoPanel = null;
+      window.removeEventListener("scroll", repositionCurrentPanel);
+      window.removeEventListener("resize", repositionCurrentPanel);
     }
   }
 }
 
 function positionPanelInViewport(panel, iconElement) {
+  console.log("=== POSITIONING PANEL DEBUG START ===");
+
   // Remove any existing positioning classes
   panel.classList.remove("position-above", "position-left", "position-right", "position-center");
-  
-  // Get dimensions
-  const panelWidth = 450; // panel width from CSS
-  const panelHeight = 400; // max-height from CSS
-  const iconRect = iconElement.getBoundingClientRect();
+
+  // Find the SVG container to center the panel on
+  const svgElement = document.querySelector("svg");
+  console.log("SVG element found:", !!svgElement);
+
+  if (!svgElement) {
+    // Fallback to old positioning if no SVG found
+    console.log("No SVG found, using fallback positioning");
+    panel.classList.add("position-center");
+    return;
+  }
+
+  // Get SVG container dimensions and position
+  const svgRect = svgElement.getBoundingClientRect();
+
+  // Calculate center position of the SVG
+  const svgCenterX = svgRect.left + (svgRect.width / 2);
+  const svgCenterY = svgRect.top + (svgRect.height / 2);
+
+  // Set position to fixed and center on SVG using transform
+  // This is the key technique from the research: use transform for perfect centering
+  console.log("Setting panel to fixed position at SVG center:", svgCenterX, svgCenterY);
+  panel.style.position = "fixed";
+  panel.style.left = svgCenterX + "px";
+  panel.style.top = svgCenterY + "px";
+  panel.style.transform = "translate(-50%, -50%)";
+  panel.style.zIndex = "1000";
+  console.log("Panel positioned with transform: translate(-50%, -50%)");
+
+  // Ensure panel fits within viewport bounds
   const viewportWidth = window.innerWidth;
   const viewportHeight = window.innerHeight;
-  const padding = 20; // minimum distance from viewport edge
-  
-  // Calculate available space in all directions
-  const spaceBelow = viewportHeight - iconRect.bottom;
-  const spaceAbove = iconRect.top;
-  const spaceLeft = iconRect.left;
-  const spaceRight = viewportWidth - iconRect.right;
-  
-  // Determine vertical positioning (above vs below)
-  const needsAbove = spaceBelow < panelHeight + padding && spaceAbove > spaceBelow;
-  if (needsAbove) {
-    panel.classList.add("position-above");
+  const padding = 20;
+
+  // Get panel dimensions after positioning
+  const panelRect = panel.getBoundingClientRect();
+
+  // Adjust if panel would go outside viewport bounds
+  let adjustedX = svgCenterX;
+  let adjustedY = svgCenterY;
+
+  // Check horizontal bounds
+  if (panelRect.left < padding) {
+    adjustedX = svgCenterX + (padding - panelRect.left);
+  } else if (panelRect.right > viewportWidth - padding) {
+    adjustedX = svgCenterX - (panelRect.right - (viewportWidth - padding));
   }
-  
-  // Determine horizontal positioning
-  // Default position is left: -225px (panel centered on icon, half of 450px width)
-  const defaultLeft = -225;
-  const panelLeftEdge = iconRect.left + defaultLeft;
-  const panelRightEdge = panelLeftEdge + panelWidth;
-  
-  if (panelLeftEdge < padding) {
-    // Panel would extend beyond left edge - position to the right
-    panel.classList.add("position-right");
-  } else if (panelRightEdge > viewportWidth - padding) {
-    // Panel would extend beyond right edge - position to the left
-    panel.classList.add("position-left");
-  } else {
-    // Default centered position works fine
-    panel.classList.add("position-center");
+
+  // Check vertical bounds
+  if (panelRect.top < padding) {
+    adjustedY = svgCenterY + (padding - panelRect.top);
+  } else if (panelRect.bottom > viewportHeight - padding) {
+    adjustedY = svgCenterY - (panelRect.bottom - (viewportHeight - padding));
   }
-  
-  // Additional check: if panel is still too tall even when positioned above/below
-  if ((needsAbove && spaceAbove < panelHeight + padding) || 
-      (!needsAbove && spaceBelow < panelHeight + padding)) {
-    // Reduce panel height to fit available space
-    const maxHeight = Math.max(200, (needsAbove ? spaceAbove : spaceBelow) - padding);
-    panel.style.maxHeight = maxHeight + "px";
-  } else {
-    // Reset to default max-height
-    panel.style.maxHeight = "400px";
+
+  // Apply final position
+  panel.style.left = adjustedX + "px";
+  panel.style.top = adjustedY + "px";
+}
+
+// Function to reposition current panel on scroll/resize
+function repositionCurrentPanel() {
+  if (window.currentInfoPanel && window.currentInfoPanel.panel.style.display === "block") {
+    positionPanelInViewport(window.currentInfoPanel.panel, window.currentInfoPanel.iconElement);
   }
 }
 
@@ -883,6 +915,10 @@ function closeInfoPanel(buttonElement) {
   if (panel) {
     panel.style.display = "none";
   }
+  // Clean up event listeners
+  window.currentInfoPanel = null;
+  window.removeEventListener("scroll", repositionCurrentPanel);
+  window.removeEventListener("resize", repositionCurrentPanel);
   document.removeEventListener("click", handleClickOutside);
 }
 
@@ -891,6 +927,10 @@ function closeAllInfoPanels() {
   allPanels.forEach(panel => {
     panel.style.display = "none";
   });
+  // Clean up event listeners
+  window.currentInfoPanel = null;
+  window.removeEventListener("scroll", repositionCurrentPanel);
+  window.removeEventListener("resize", repositionCurrentPanel);
   document.removeEventListener("click", handleClickOutside);
 }
 

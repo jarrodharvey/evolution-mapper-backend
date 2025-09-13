@@ -302,11 +302,26 @@ enhance_tree_html_with_info_panels <- function(tree_html, network_data) {
       .style("max-width", "320px")
       .html(panelHtml);
       
-    // Position panel near the icon
-    var iconRect = iconElement.getBoundingClientRect();
-    panel
-      .style("left", (iconRect.right + 10) + "px")
-      .style("top", iconRect.top + "px");
+    // Position panel at the center of the SVG container to avoid cutoffs
+    var svgElement = document.querySelector("svg");
+    if (svgElement) {
+      var svgRect = svgElement.getBoundingClientRect();
+      var svgCenterX = svgRect.left + (svgRect.width / 2);
+      var svgCenterY = svgRect.top + (svgRect.height / 2);
+
+      panel
+        .style("position", "fixed")
+        .style("left", svgCenterX + "px")
+        .style("top", svgCenterY + "px")
+        .style("transform", "translate(-50%, -50%)")
+        .style("z-index", "1000");
+    } else {
+      // Fallback to old positioning if no SVG found
+      var iconRect = iconElement.getBoundingClientRect();
+      panel
+        .style("left", (iconRect.right + 10) + "px")
+        .style("top", iconRect.top + "px");
+    }
       
     // Close panel when clicking outside
     setTimeout(function() {
@@ -660,11 +675,26 @@ enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, c
       .style("max-width", "320px")
       .html(panelHtml);
       
-    // Position panel near the icon
-    var iconRect = iconElement.getBoundingClientRect();
-    panel
-      .style("left", (iconRect.right + 10) + "px")
-      .style("top", iconRect.top + "px");
+    // Position panel at the center of the SVG container to avoid cutoffs
+    var svgElement = document.querySelector("svg");
+    if (svgElement) {
+      var svgRect = svgElement.getBoundingClientRect();
+      var svgCenterX = svgRect.left + (svgRect.width / 2);
+      var svgCenterY = svgRect.top + (svgRect.height / 2);
+
+      panel
+        .style("position", "fixed")
+        .style("left", svgCenterX + "px")
+        .style("top", svgCenterY + "px")
+        .style("transform", "translate(-50%, -50%)")
+        .style("z-index", "1000");
+    } else {
+      // Fallback to old positioning if no SVG found
+      var iconRect = iconElement.getBoundingClientRect();
+      panel
+        .style("left", (iconRect.right + 10) + "px")
+        .style("top", iconRect.top + "px");
+    }
       
     // Close panel when clicking outside
     setTimeout(function() {
