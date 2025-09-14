@@ -8,6 +8,17 @@ library(base64enc)
 # Source shared logging configuration
 source("functions/logging_config.R")
 
+# Load ChatGPT API functions for taxonomic name conversion
+# This will be loaded via cached_api_functions.R to avoid circular dependency
+chatgpt_available <- FALSE
+tryCatch({
+  if (exists("cached_get_chatgpt_summary")) {
+    chatgpt_available <- TRUE
+  }
+}, error = function(e) {
+  # ChatGPT functions not yet loaded
+})
+
 # Main function to fetch relevant Unsplash image for a taxonomic group
 get_unsplash_random_image <- function(taxonomic_group, target_width = 800) {
   if (is.null(taxonomic_group) || is.na(taxonomic_group) || taxonomic_group == "") {
@@ -118,7 +129,46 @@ clean_taxonomic_name_for_unsplash <- function(name) {
   cleaned <- gsub("\\s+(group|clade)$", "", cleaned, ignore.case = TRUE)
   cleaned <- trimws(cleaned)
 
-  # For better Unsplash results, add context for broad taxonomic groups
+  # Check if ChatGPT is available and try to get a better search term
+  chatgpt_summary <- NULL
+  if (exists("cached_get_chatgpt_summary")) {
+    tryCatch({
+      api_log_info(paste("Attempting to get ChatGPT summary for:", cleaned))
+      chatgpt_result <- cached_get_chatgpt_summary(cleaned)
+      if (chatgpt_result$success && !is.null(chatgpt_result$summary) && chatgpt_result$summary != "") {
+        chatgpt_summary <- chatgpt_result$summary
+        api_log_info(paste("ChatGPT summary for", cleaned, ":", chatgpt_summary))
+        api_log_info(paste("ChatGPT converted", cleaned, "to:", chatgpt_summary))
+      } else {
+        api_log_warn(paste("ChatGPT failed for", cleaned, ":", chatgpt_result$error))
+        if (!is.null(chatgpt_result$raw_summary)) {
+          api_log_warn(paste("Raw ChatGPT response was:", chatgpt_result$raw_summary))
+        }
+      }
+    }, error = function(e) {
+      api_log_warn(paste("Error calling ChatGPT for", cleaned, ":", conditionMessage(e)))
+    })
+  }
+
+  # If ChatGPT provided a good summary, use it with wildlife/nature context
+  if (!is.null(chatgpt_summary)) {
+    # Add appropriate context based on the summary
+    if (grepl("mammal|animal|creature", chatgpt_summary, ignore.case = TRUE)) {
+      return(paste(chatgpt_summary, "wildlife"))
+    } else if (grepl("bird|fly|wing", chatgpt_summary, ignore.case = TRUE)) {
+      return(paste(chatgpt_summary, "birds wildlife"))
+    } else if (grepl("fish|aquatic|marine", chatgpt_summary, ignore.case = TRUE)) {
+      return(paste(chatgpt_summary, "underwater"))
+    } else if (grepl("plant|tree|flower", chatgpt_summary, ignore.case = TRUE)) {
+      return(paste(chatgpt_summary, "nature"))
+    } else if (grepl("insect|bug", chatgpt_summary, ignore.case = TRUE)) {
+      return(paste(chatgpt_summary, "nature"))
+    } else {
+      return(paste(chatgpt_summary, "wildlife nature"))
+    }
+  }
+
+  # Fallback to original hardcoded mappings if ChatGPT is not available or failed
   if (cleaned %in% c("Mammalia", "Mammals")) {
     return("mammals wildlife")
   } else if (cleaned %in% c("Aves", "Birds")) {
