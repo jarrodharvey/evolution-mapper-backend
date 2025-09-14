@@ -1049,11 +1049,126 @@ document.addEventListener("click", function(event) {
   }
 });
 
-// Removed JavaScript optimization code - dimensions are now pre-calculated server-side
+// Intelligent Wikipedia text fitting function
+function fitWikipediaTextToContainer() {
+  const wikipediaSummaries = document.querySelectorAll(".wikipedia-summary");
 
-// Panel dimensions are pre-calculated server-side, no JavaScript optimization needed
+  wikipediaSummaries.forEach(summary => {
+    fitTextToContainer(summary);
+  });
+}
 
-console.log("Info panel system initialized with server-side Wikipedia integration and pre-calculated dimensions");
+function fitTextToContainer(textElement) {
+  const originalText = textElement.textContent;
+  const container = textElement;
+
+  // Skip if no text content
+  if (!originalText || originalText.trim().length === 0) {
+    return;
+  }
+
+  // Store original text as a data attribute if not already stored
+  if (!textElement.dataset.originalText) {
+    textElement.dataset.originalText = originalText;
+  }
+
+  // Get the original text from data attribute (in case it was truncated before)
+  const fullText = textElement.dataset.originalText;
+
+  // Set to full text initially
+  textElement.textContent = fullText;
+
+  // Check if text fits in container
+  if (!isTextOverflowing(textElement)) {
+    // Text fits perfectly, no truncation needed
+    return;
+  }
+
+  // Split text into sentences
+  const sentences = splitIntoSentences(fullText);
+
+  if (sentences.length === 0) {
+    return;
+  }
+
+  // Start with all sentences and progressively remove from end until it fits
+  let fittingSentences = [...sentences];
+  let truncated = false;
+
+  while (fittingSentences.length > 0) {
+    const testText = fittingSentences.join(" ");
+    textElement.textContent = testText;
+
+    if (!isTextOverflowing(textElement)) {
+      // This length fits
+      if (truncated) {
+        // Add ellipsis only if we actually removed sentences
+        textElement.textContent = testText + "...";
+
+        // Check if ellipsis causes overflow
+        if (isTextOverflowing(textElement) && fittingSentences.length > 1) {
+          // Remove one more sentence to make room for ellipsis
+          fittingSentences.pop();
+          textElement.textContent = fittingSentences.join(" ") + "...";
+        }
+      }
+      break;
+    }
+
+    // Remove last sentence and try again
+    fittingSentences.pop();
+    truncated = true;
+  }
+
+  // Fallback: if no sentences fit, use first sentence only
+  if (fittingSentences.length === 0 && sentences.length > 0) {
+    textElement.textContent = sentences[0] + "...";
+  }
+}
+
+function isTextOverflowing(element) {
+  return element.scrollHeight > element.clientHeight;
+}
+
+function splitIntoSentences(text) {
+  // Split on periods, exclamation marks, and question marks followed by space or end
+  // This preserves sentence boundaries better than character limits
+  const sentences = text
+    .split(/[.!?]+ /)
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
+
+  // Add back periods to all but the last sentence for proper sentence structure
+  for (let i = 0; i < sentences.length - 1; i++) {
+    if (!sentences[i].endsWith(".") && !sentences[i].endsWith("!") && !sentences[i].endsWith("?")) {
+      sentences[i] += ".";
+    }
+  }
+
+  return sentences;
+}
+
+// Initialize text fitting when DOM is loaded
+document.addEventListener("DOMContentLoaded", function() {
+  fitWikipediaTextToContainer();
+});
+
+// Re-fit text when panels are opened (after they become visible)
+const originalToggleInfoPanel = toggleInfoPanel;
+toggleInfoPanel = function(iconElement) {
+  originalToggleInfoPanel(iconElement);
+
+  // Small delay to allow panel to render
+  setTimeout(() => {
+    const openPanel = document.querySelector(".info-panel[style*=block]");
+    if (openPanel) {
+      const summaries = openPanel.querySelectorAll(".wikipedia-summary");
+      summaries.forEach(summary => fitTextToContainer(summary));
+    }
+  }, 10);
+};
+
+console.log("Info panel system initialized with intelligent Wikipedia text fitting");
 </script>
   ')
 }
@@ -1257,7 +1372,7 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
       wikipedia_start <- Sys.time()
       tryCatch({
         if (exists("cached_get_wikipedia_intro")) {
-          wikipedia_result <- cached_get_wikipedia_intro(taxonomic_name, truncate_length = 250)
+          wikipedia_result <- cached_get_wikipedia_intro(taxonomic_name, truncate_length = 800)
           if (wikipedia_result$success) {
             node_info$wikipedia_summary <- wikipedia_result$introduction
             node_info$wikipedia_url <- wikipedia_result$url
@@ -1491,7 +1606,7 @@ add_wikipedia_data <- function(node_info) {
   tryCatch({
     # Check if cached wikipedia API function exists
     if (exists("cached_get_wikipedia_intro")) {
-      wikipedia_result <- cached_get_wikipedia_intro(taxonomic_name, truncate_length = 250)
+      wikipedia_result <- cached_get_wikipedia_intro(taxonomic_name, truncate_length = 800)
       
       if (wikipedia_result$success) {
         # Add Wikipedia data to node_info
