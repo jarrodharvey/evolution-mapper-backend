@@ -394,6 +394,90 @@ enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, c
   // PhyloPic node replacement data
   var phylopicNodeData = ', phylopic_node_data_js, ';
   
+  // Utility function to convert RGB color to CSS filter for recoloring black silhouettes
+  function colorToFilterCSS(color) {
+    if (!color || color === "none" || color === "") return null;
+
+    try {
+      // Handle different color formats (rgb, rgba, hex)
+      var rgb = null;
+
+      if (color.startsWith("rgb(")) {
+        // Parse rgb(r, g, b) format
+        var match = color.match(/rgb\\(([^)]+)\\)/);
+        if (match) {
+          var values = match[1].split(",").map(v => parseInt(v.trim()));
+          rgb = { r: values[0], g: values[1], b: values[2] };
+        }
+      } else if (color.startsWith("rgba(")) {
+        // Parse rgba(r, g, b, a) format
+        var match = color.match(/rgba\\(([^)]+)\\)/);
+        if (match) {
+          var values = match[1].split(",").map(v => parseFloat(v.trim()));
+          rgb = { r: values[0], g: values[1], b: values[2] };
+        }
+      } else if (color.startsWith("#")) {
+        // Parse hex format
+        var hex = color.replace("#", "");
+        if (hex.length === 3) {
+          hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+        }
+        rgb = {
+          r: parseInt(hex.substr(0, 2), 16),
+          g: parseInt(hex.substr(2, 2), 16),
+          b: parseInt(hex.substr(4, 2), 16)
+        };
+      }
+
+      if (!rgb) return null;
+
+      // Convert RGB to hue-rotate and saturate values for CSS filter
+      // This is a simplified approach - more complex color mapping could be implemented
+      var hue = rgbToHue(rgb.r, rgb.g, rgb.b);
+      var saturation = rgbToSaturation(rgb.r, rgb.g, rgb.b);
+      var brightness = (rgb.r + rgb.g + rgb.b) / (3 * 255);
+
+      // Create CSS filter that converts black to the target color
+      var filter = "brightness(0) saturate(100%) invert(" + Math.round(brightness * 100) + "%) sepia(100%) saturate(" + Math.round(saturation * 500) + "%) hue-rotate(" + Math.round(hue) + "deg)";
+
+      return filter;
+
+    } catch (e) {
+      console.error("Error converting color to filter:", e);
+      return null;
+    }
+  }
+
+  // Helper function to calculate hue from RGB
+  function rgbToHue(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    var max = Math.max(r, g, b), min = Math.min(r, g, b);
+    var h, s, l = (max + min) / 2;
+
+    if (max === min) {
+      h = s = 0; // achromatic
+    } else {
+      var d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      switch (max) {
+        case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+        case g: h = (b - r) / d + 2; break;
+        case b: h = (r - g) / d + 4; break;
+      }
+      h /= 6;
+    }
+
+    return h * 360;
+  }
+
+  // Helper function to calculate saturation from RGB
+  function rgbToSaturation(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    var max = Math.max(r, g, b), min = Math.min(r, g, b);
+    var s = max === 0 ? 0 : (max - min) / max;
+    return s;
+  }
+
   // Function to replace taxonomic nodes with PhyloPic silhouettes
   function replacePhylopicNodes() {
     console.log("=== PHYLOPIC NODE REPLACEMENT START ===");
@@ -451,24 +535,72 @@ enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, c
       var phylopicData = phylopicNodeData[taxonomicName];
       if (phylopicData && phylopicData.data_url) {
         console.log("Replacing node with PhyloPic:", taxonomicName);
-        
+
         try {
-          // Get circle and text properties for positioning
+          // Get circle properties for positioning and color inheritance
           var circleR = parseFloat(circle.attr("r")) || 4.5;
           var circleX = parseFloat(circle.attr("cx")) || 0;
           var circleY = parseFloat(circle.attr("cy")) || 0;
-          
+
+          // EXTRACT COLOR FROM ORIGINAL CIRCLE for inheritance
+          var inheritedColor = null;
+          try {
+            var circleNode = circle.node();
+            if (circleNode) {
+              // Try multiple approaches to get the color
+              console.log("=== COLOR EXTRACTION DEBUG for", taxonomicName, "===");
+
+              // Method 1: Computed style
+              var computedStyle = window.getComputedStyle(circleNode);
+              var computedFill = computedStyle.fill;
+              console.log("  Computed fill:", computedFill);
+
+              // Method 2: Direct fill attribute
+              var attrFill = circle.attr("fill");
+              console.log("  Attribute fill:", attrFill);
+
+              // Method 3: D3 style
+              var d3Fill = circle.style("fill");
+              console.log("  D3 style fill:", d3Fill);
+
+              // Method 4: Direct style attribute
+              var styleFill = circleNode.style.fill;
+              console.log("  Direct style fill:", styleFill);
+
+              // Choose the best available color
+              if (computedFill && computedFill !== "none" && computedFill !== "" && computedFill !== "rgb(0, 0, 0)") {
+                inheritedColor = computedFill;
+                console.log("  Using computed style color");
+              } else if (d3Fill && d3Fill !== "none" && d3Fill !== "" && d3Fill !== "rgb(0, 0, 0)") {
+                inheritedColor = d3Fill;
+                console.log("  Using D3 style color");
+              } else if (attrFill && attrFill !== "none" && attrFill !== "" && attrFill !== "#000000") {
+                inheritedColor = attrFill;
+                console.log("  Using attribute color");
+              } else if (styleFill && styleFill !== "none" && styleFill !== "" && styleFill !== "rgb(0, 0, 0)") {
+                inheritedColor = styleFill;
+                console.log("  Using direct style color");
+              }
+
+              console.log("  FINAL inherited color for", taxonomicName, ":", inheritedColor);
+              console.log("=== END COLOR EXTRACTION DEBUG ===");
+            }
+          } catch (colorError) {
+            console.warn("Failed to extract color for", taxonomicName, ":", colorError);
+            inheritedColor = null;
+          }
+
           // Calculate image size (slightly larger than original circle)
           var imageSize = Math.max(phylopicData.target_size || 35, circleR * 2.2);
-          
+
           // Position PhyloPic slightly to the right of the original circle position
           // This avoids getBBox() calculation issues with CollapsibleTree
           var phylopicX = circleX - circleR; // Positioned at left edge of circle
           var phylopicY = circleY - imageSize / 2; // Centered on circle
-          
+
           // Hide the original circle instead of removing it (preserve functionality)
           circle.style("opacity", 0);
-          
+
           // Add PhyloPic image positioned to avoid text overlap
           var image = node.append("image")
             .attr("class", "phylopic-node-image")
@@ -480,12 +612,60 @@ enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, c
             .style("cursor", "pointer")
             .style("opacity", 0.9)
             .attr("title", "PhyloPic silhouette for " + taxonomicName);
-          
-          // Store original circle reference for potential restoration
+
+          // APPLY COLOR INHERITANCE if color was successfully extracted
+          if (inheritedColor && inheritedColor !== "none" && inheritedColor !== "") {
+            // Use SVG-based recoloring for better color accuracy
+            try {
+              // For PNG images, we need to use a different approach
+              // Create a colored version by applying the color directly to the image
+              var canvas = document.createElement("canvas");
+              var ctx = canvas.getContext("2d");
+              var img = new Image();
+
+              img.onload = function() {
+                canvas.width = img.width;
+                canvas.height = img.height;
+
+                // Draw the original image
+                ctx.drawImage(img, 0, 0);
+
+                // Apply color overlay using composite operation
+                ctx.globalCompositeOperation = "source-in";
+                ctx.fillStyle = inheritedColor;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                // Convert back to data URL and update the image
+                var coloredDataURL = canvas.toDataURL();
+                image.attr("xlink:href", coloredDataURL);
+
+                console.log("Applied color inheritance to", taxonomicName, "using color:", inheritedColor);
+              };
+
+              // Set the source to trigger the onload
+              img.src = phylopicData.data_url;
+
+            } catch (canvasError) {
+              console.warn("Canvas recoloring failed for", taxonomicName, ", trying CSS filter fallback:", canvasError);
+              // Fallback to CSS filter approach
+              var filterCSS = colorToFilterCSS(inheritedColor);
+              if (filterCSS) {
+                image.style("filter", filterCSS);
+                console.log("Applied color inheritance filter fallback to", taxonomicName, ":", filterCSS);
+              } else {
+                console.warn("Both canvas and filter approaches failed for", taxonomicName, "- using default black");
+              }
+            }
+          } else {
+            console.warn("No inherited color available for", taxonomicName, "- using default black silhouette");
+          }
+
+          // Store original circle reference and color info for potential restoration
           image.node()._originalCircle = circle.node();
-          
+          image.node()._inheritedColor = inheritedColor;
+
           console.log("Successfully replaced", taxonomicName, "with PhyloPic silhouette");
-          
+
         } catch (e) {
           console.error("Error replacing node", taxonomicName, "with PhyloPic:", e);
           // Ensure circle remains visible if replacement fails

@@ -212,72 +212,46 @@ test_phylopic_connection <- function() {
   }
 }
 
-# Determine appropriate color for PhyloPic silhouettes based on node type and age
-get_phylopic_color <- function(node_type = "taxonomic", age_value = NULL, has_age_data = FALSE) {
-  # Source color configuration if not already loaded
-  if (!exists("get_node_color", mode = "function")) {
-    source("functions/color_config.R")
-  }
-  
-  # Handle age data availability and calculate color
-  if (has_age_data && !is.null(age_value) && !is.na(age_value) && age_value > 0) {
-    # Use gradient colors for age-aware coloring
-    if (exists("get_gradient_color", mode = "function")) {
-      # Calculate age scale - this needs to be relative to other nodes
-      # For now, use a simple scaling approach (this may need refinement)
-      # Assume age_value is in millions of years (Mya)
-      # Scale between 0-1 where higher values (older) = darker colors
-      max_reasonable_age <- 500  # 500 Mya as reasonable maximum for most trees
-      age_scale <- min(age_value / max_reasonable_age, 1.0)
-      
-      color <- get_gradient_color(node_type, age_scale)
-      return(color)
-    }
-  }
-  
-  # Fallback to base colors when age unavailable or gradient function not available
-  color <- get_node_color(node_type, has_age = has_age_data)
-  return(color)
-}
 
-# Get PhyloPic silhouette data formatted for inline SVG replacement  
-get_silhouette_for_node_replacement <- function(taxonomic_name, target_size = 35, use_cache = TRUE, node_type = "taxonomic", age_value = NULL, has_age_data = FALSE) {
+# Get PhyloPic silhouette data formatted for inline SVG replacement
+get_silhouette_for_node_replacement <- function(taxonomic_name, target_size = 35, use_cache = TRUE, inherited_color = NULL) {
   if (is.null(taxonomic_name) || is.na(taxonomic_name) || taxonomic_name == "") {
     return(list(success = FALSE, error = "No taxonomic name provided"))
   }
-  
+
   # Get a random UUID for this taxonomic group using cached function if available
   if (use_cache && exists("cached_get_random_silhouette_uuid", mode = "function")) {
     uuid <- cached_get_random_silhouette_uuid(taxonomic_name)
   } else {
     uuid <- get_random_silhouette_uuid(taxonomic_name)
   }
-  
+
   if (is.null(uuid)) {
     return(list(success = FALSE, error = "No silhouettes found"))
   }
-  
+
   tryCatch({
     # Get the silhouette image as raster for consistent handling
     silhouette_raster <- get_phylopic(uuid = uuid, format = "raster")
-    
-    # Determine the appropriate color for this node type and age
-    phylopic_color <- get_phylopic_color(node_type, age_value, has_age_data)
-    
-    # Apply color to the silhouette using recolor_phylopic
-    if (!is.null(phylopic_color) && phylopic_color != "#000000") {  # Only recolor if not black
-      colored_silhouette <- recolor_phylopic(silhouette_raster, fill = phylopic_color, remove_background = TRUE)
+
+    # Color handling: Use inherited color if available, otherwise skip coloring (default black)
+    if (!is.null(inherited_color) && nchar(trimws(inherited_color)) > 0) {
+      # Apply inherited color to the silhouette using recolor_phylopic
+      colored_silhouette <- recolor_phylopic(silhouette_raster, fill = inherited_color, remove_background = TRUE)
+      applied_color <- inherited_color
     } else {
-      colored_silhouette <- silhouette_raster  # Use original if color is black or null
+      # No color inheritance - use default black silhouette (visually obvious failure)
+      colored_silhouette <- silhouette_raster
+      applied_color <- "#000000"  # Default black
     }
-    
-    # Convert colored silhouette to data URL with optimal sizing for node replacement
+
+    # Convert silhouette to data URL with optimal sizing for node replacement
     data_url <- raster_to_data_url(colored_silhouette, target_width = target_size, target_height = target_size)
-    
+
     if (is.null(data_url)) {
       return(list(success = FALSE, error = "Failed to convert silhouette to data URL"))
     }
-    
+
     # Get attribution information
     attribution <- get_attribution(uuid = uuid)
     attribution_text <- if (is.data.frame(attribution) && nrow(attribution) > 0) {
@@ -286,7 +260,7 @@ get_silhouette_for_node_replacement <- function(taxonomic_name, target_size = 35
     } else {
       "Silhouette via PhyloPic"
     }
-    
+
     return(list(
       success = TRUE,
       uuid = uuid,
@@ -294,12 +268,11 @@ get_silhouette_for_node_replacement <- function(taxonomic_name, target_size = 35
       attribution = attribution_text,
       phylopic_url = paste0("https://www.phylopic.org/images/", uuid),
       target_size = target_size,
-      applied_color = phylopic_color,
-      node_type = node_type,
-      age_value = age_value,
-      has_age_data = has_age_data
+      applied_color = applied_color,
+      inherited_color = inherited_color,
+      color_inheritance_used = !is.null(inherited_color)
     ))
-    
+
   }, error = function(e) {
     cat("Warning: Could not retrieve silhouette for node replacement:", taxonomic_name, "UUID:", uuid, ":", e$message, "\n")
     return(list(success = FALSE, error = paste("Silhouette retrieval failed:", e$message)))
@@ -361,14 +334,12 @@ create_phylopic_node_replacement_data <- function(network_data, request_id = NUL
             age_value <- NULL
           }
           
-          # Get PhyloPic data optimized for node replacement with age-based coloring
+          # Get PhyloPic data optimized for node replacement (color inheritance will happen on frontend)
           phylopic_result <- get_silhouette_for_node_replacement(
-            taxonomic_name, 
-            target_size = 35, 
+            taxonomic_name,
+            target_size = 35,
             use_cache = use_cache,
-            node_type = "taxonomic",
-            age_value = age_value,
-            has_age_data = has_age_data
+            inherited_color = NULL  # Color inheritance happens on frontend
           )
           
           if (phylopic_result$success) {
@@ -379,9 +350,9 @@ create_phylopic_node_replacement_data <- function(network_data, request_id = NUL
               phylopic_url = phylopic_result$phylopic_url,
               target_size = phylopic_result$target_size,
               applied_color = phylopic_result$applied_color,
-              node_type = phylopic_result$node_type,
-              age_value = phylopic_result$age_value,
-              has_age_data = phylopic_result$has_age_data
+              color_inheritance_used = phylopic_result$color_inheritance_used,
+              age_value = age_value,
+              has_age_data = has_age_data
             )
             api_log_info(paste("[", request_id, "] PhyloPic success for:", taxonomic_name))
           } else {
