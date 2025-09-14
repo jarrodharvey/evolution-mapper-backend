@@ -41,13 +41,13 @@ TREE_COLORS <- list(
   ),
   # New ancestral node coloring system
   viridis_old = list(
-    hex = "#440154",
-    name = "Deep Blue",
+    hex = "#08306b",
+    name = "Dark Navy",
     description = "Oldest ancestral nodes in age gradient"
   ),
   viridis_young = list(
-    hex = "#fde725",
-    name = "Pale Greenish Yellow",
+    hex = "#a6cee3",
+    name = "Light Blue",
     description = "Youngest ancestral nodes in age gradient"
   ),
   no_age_mixed = list(
@@ -183,7 +183,7 @@ get_viridis_gradient_colors <- function(nodes_with_age) {
 
   if (nrow(nodes_with_age) == 1) {
     # Single node - use middle of gradient
-    return("#21908c")  # Viridis middle point
+    return("#4292c6")  # Bluescale middle point
   }
 
   # Extract age values from AgeInfo strings
@@ -203,7 +203,7 @@ get_viridis_gradient_colors <- function(nodes_with_age) {
   # Create gradient from deep blue (oldest) to pale greenish yellow (youngest)
   if (length(unique(ages)) == 1) {
     # All same age - use middle color
-    return(rep("#21908c", nrow(nodes_with_age)))
+    return(rep("#4292c6", nrow(nodes_with_age)))
   }
 
   # Normalize ages to 0-1 scale (inverse: older = higher value for darker color)
@@ -219,9 +219,9 @@ get_viridis_gradient_colors <- function(nodes_with_age) {
 
   for (i in seq_along(age_scales)) {
     scale <- age_scales[i]
-    r <- old_color[1] * scale + young_color[1] * (1 - scale)
-    g <- old_color[2] * scale + young_color[2] * (1 - scale)
-    b <- old_color[3] * scale + young_color[3] * (1 - scale)
+    r <- young_color[1] * scale + old_color[1] * (1 - scale)
+    g <- young_color[2] * scale + old_color[2] * (1 - scale)
+    b <- young_color[3] * scale + old_color[3] * (1 - scale)
     colors[i] <- rgb(r, g, b)
   }
 
