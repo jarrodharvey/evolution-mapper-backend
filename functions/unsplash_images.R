@@ -162,22 +162,18 @@ format_unsplash_attribution <- function(image_data) {
 }
 
 # Generate HTML for Unsplash image display in info panels
-format_unsplash_image_html <- function(image_data, max_display_width = 100) {
+format_unsplash_image_html <- function(image_data) {
   if (!image_data$success) {
     return("")  # Return empty string if no image available
   }
 
-  # Calculate display dimensions while maintaining aspect ratio
-  display_width <- min(max_display_width, 100)  # Cap at 100px for panel display
-
-  # Create HTML for image display with attribution
+  # Create HTML for image display - let CSS and natural image size determine dimensions
   image_html <- paste0(
     '<div class="unsplash-image-section">',
     '<div class="unsplash-image-container">',
     '<img src="', image_data$image_url,
     '" alt="', image_data$alt_description, '"',
     ' class="unsplash-taxonomic-image"',
-    ' style="max-width:', display_width, 'px;"',
     ' loading="lazy" />',
     '</div>',
     '</div>'

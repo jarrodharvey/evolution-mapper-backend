@@ -113,8 +113,12 @@ enhance_tree_html_with_info_panels <- function(tree_html, network_data) {
   # Add layout CSS and info panel CSS
   layout_css <- "<style>body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; } html { margin: 0 !important; padding: 0 !important; } #htmlwidget_container { margin: 0 !important; padding: 0 !important; }</style>"
   
-  # Generate info panel CSS with the text wrapping improvements
-  info_panel_css <- paste0("<style>", generate_info_panel_css(), "</style>")
+  # Calculate optimal dimensions for info panels (based on typical Wikipedia content)
+  # Average Wikipedia intro: ~300 characters
+  typical_dimensions <- extract_content_dimensions("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor.")
+
+  # Generate info panel CSS with pre-calculated dimensions
+  info_panel_css <- paste0("<style>", generate_info_panel_css(typical_dimensions$panel_width, typical_dimensions$text_column_width), "</style>")
   
   # Combine both CSS sections
   combined_css <- paste0(layout_css, info_panel_css)
@@ -299,7 +303,7 @@ enhance_tree_html_with_info_panels <- function(tree_html, network_data) {
       .style("padding", "16px")
       .style("box-shadow", "0 4px 15px rgba(0,0,0,0.15)")
       .style("z-index", "1000")
-      .style("max-width", "320px")
+      .style("width", "fit-content")
       .html(panelHtml);
       
     // Position panel at the center of the SVG container to avoid cutoffs
@@ -357,8 +361,12 @@ enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, c
   # Add layout CSS and info panel CSS
   layout_css <- "<style>body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; } html { margin: 0 !important; padding: 0 !important; } #htmlwidget_container { margin: 0 !important; padding: 0 !important; }</style>"
   
-  # Generate info panel CSS with the text wrapping improvements
-  info_panel_css <- paste0("<style>", generate_info_panel_css(), "</style>")
+  # Calculate optimal dimensions for info panels (based on typical Wikipedia content)
+  # Average Wikipedia intro: ~300 characters
+  typical_dimensions <- extract_content_dimensions("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor.")
+
+  # Generate info panel CSS with pre-calculated dimensions
+  info_panel_css <- paste0("<style>", generate_info_panel_css(typical_dimensions$panel_width, typical_dimensions$text_column_width), "</style>")
   
   # Combine both CSS sections
   combined_css <- paste0(layout_css, info_panel_css)
@@ -672,7 +680,7 @@ enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, c
       .style("padding", "16px")
       .style("box-shadow", "0 4px 15px rgba(0,0,0,0.15)")
       .style("z-index", "1000")
-      .style("max-width", "320px")
+      .style("width", "fit-content")
       .html(panelHtml);
       
     // Position panel at the center of the SVG container to avoid cutoffs

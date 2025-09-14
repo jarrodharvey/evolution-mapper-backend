@@ -294,13 +294,15 @@ format_combined_taxonomic_section <- function(node_data) {
   has_any_text <- has_wikipedia || has_wikipedia_error
   
   if (has_any_image && has_any_text) {
-    # Both image and text - image floated left with text wrapping
+    # Both image and text - flexbox layout with proper spacing
     combined_html <- paste0(combined_html,
       '<div class="taxonomic-wrapped-container">',
       '<div class="image-float">',
       image_content,
       '</div>',
+      '<div class="wikipedia-text-column">',
       wikipedia_content,
+      '</div>',
       '</div>'
     )
   } else if (has_any_image) {
@@ -396,8 +398,8 @@ format_wikipedia_section <- function(node_data) {
 }
 
 # Generate CSS styles for the info panel system
-generate_info_panel_css <- function() {
-  return('
+generate_info_panel_css <- function(panel_width = 800, text_column_width = 350) {
+  return(paste0('
 <style>
 /* Info Panel System Styles */
 .ancestor-info-container {
@@ -434,15 +436,16 @@ generate_info_panel_css <- function() {
 }
 
 .info-panel {
-  position: fixed;
-  width: 450px;
-  background: white;
-  border: 2px solid #3498db;
-  border-radius: 8px;
-  box-shadow: 0 4px 15px rgba(0,0,0,0.15);
-  z-index: 1000;
-  max-height: 400px;
-  overflow-y: auto;
+  position: fixed !important;
+  background: white !important;
+  border: 2px solid #3498db !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.15) !important;
+  z-index: 1000 !important;
+  width: ', panel_width, 'px !important;
+  max-height: 400px !important;
+  overflow-y: auto !important;
+  box-sizing: content-box !important;
   /* Position and transform will be set dynamically by JavaScript to center on SVG */
   /* The transform: translate(-50%, -50%) is key for perfect centering */
 }
@@ -454,7 +457,7 @@ generate_info_panel_css <- function() {
 }
 
 .info-panel.position-left {
-  left: -470px; /* panel width (450px) + some padding */
+  left: -540px; /* panel width (520px) + some padding */
 }
 
 .info-panel.position-right {
@@ -462,7 +465,7 @@ generate_info_panel_css <- function() {
 }
 
 .info-panel.position-center {
-  left: -225px; /* center the panel (half of 450px width) */
+  left: -260px; /* center the panel (half of 520px width) */
 }
 
 .info-panel-content {
@@ -575,26 +578,66 @@ generate_info_panel_css <- function() {
   padding-top: 12px;
 }
 
-/* New wrapped layout for silhouette + Wikipedia */
+/* New wrapped layout for images + Wikipedia - CSS Grid with auto-width optimization */
 .taxonomic-wrapped-container {
-  overflow: hidden; /* Clear float */
+  display: grid !important;
+  grid-template-columns: 200px ', text_column_width, 'px !important;
+  gap: 12px !important;
+  align-items: start !important;
+  box-sizing: border-box !important; /* Include padding in width calculations */
+  overflow: hidden !important; /* Prevent content overflow */
 }
 
 .silhouette-float {
-  float: left;
-  width: 100px;
-  margin-right: 12px;
-  margin-bottom: 8px;
+  grid-column: 1;
 }
 
-.taxonomic-wrapped-container .wikipedia-summary {
-  text-align: left;
-  word-wrap: break-word;
-  overflow-wrap: break-word;
-  margin: 0 0 8px 0;
-  font-size: 13px;
-  line-height: 1.3;
-  color: #495057;
+.silhouette-float img {
+  width: 200px;
+  height: 200px;
+  object-fit: cover;
+  border-radius: 4px;
+  display: block;
+}
+
+.wikipedia-summary {
+  text-align: left !important;
+  word-wrap: break-word !important;
+  overflow-wrap: break-word !important;
+  margin: 0 !important;
+  font-size: 13px !important;
+  line-height: 1.4 !important;
+  color: #495057 !important;
+  flex: 1 !important;
+  overflow: hidden !important;
+  padding-right: 8px !important;
+  box-sizing: content-box !important;
+  white-space: normal !important;
+}
+
+.wikipedia-link {
+  color: #3498db;
+  text-decoration: none;
+  font-size: 12px;
+  margin-top: 8px;
+  flex-shrink: 0;
+}
+
+.wikipedia-link:hover {
+  text-decoration: underline;
+}
+
+.wikipedia-text-column {
+  height: 200px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  width: ', text_column_width, 'px !important; /* Pre-calculated width based on content */
+  box-sizing: border-box !important; /* Include padding in width calculations */
+  min-width: unset !important;
+  max-width: unset !important;
+  overflow: hidden !important; /* Prevent content from overflowing */
+  word-wrap: break-word !important;
+  overflow-wrap: break-word !important;
 }
 
 /* Legacy flex container for compatibility */
@@ -691,15 +734,11 @@ generate_info_panel_css <- function() {
   display: flex;
   justify-content: center;
   align-items: center;
-  min-height: 60px;
   width: 100%;
-  overflow: hidden;
   box-sizing: border-box;
 }
 
 .unsplash-taxonomic-image {
-  max-width: 90px;
-  max-height: 90px;
   width: auto;
   height: auto;
   object-fit: contain;
@@ -741,19 +780,22 @@ generate_info_panel_css <- function() {
   margin: 0 auto;
 }
 
-/* Floating images in combined layout */
+/* Images in combined layout */
 .image-float {
-  float: left;
-  width: 100px;
-  margin-right: 12px;
-  margin-bottom: 8px;
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 200px;
+  margin-right: 0;
+  margin-bottom: 0;
 }
 
 .image-float .unsplash-image-container,
 .image-float .wikipedia-image-container,
 .image-float .silhouette-container {
   margin: 0;
-  height: 70px;
+  padding: 8px;
+  background: #f8f9fa;
+  border-radius: 4px;
 }
 
 .close-panel {
@@ -782,9 +824,14 @@ generate_info_panel_css <- function() {
 /* Mobile responsive styles */
 @media (max-width: 768px) {
   .info-panel {
-    left: -180px;
-    width: 380px;
+    min-width: 400px;
+    max-width: 600px;
     max-height: 350px;
+  }
+
+  .taxonomic-wrapped-container .wikipedia-summary {
+    max-height: 180px;
+    font-size: 12px;
   }
   
   .taxonomic-flex-container {
@@ -813,9 +860,19 @@ generate_info_panel_css <- function() {
 /* Very small screens */
 @media (max-width: 480px) {
   .info-panel {
-    left: -140px;
-    width: 320px;
+    min-width: 350px;
+    max-width: 450px;
     max-height: 300px;
+  }
+
+  .taxonomic-wrapped-container {
+    flex-direction: column;
+    min-height: auto;
+  }
+
+  .taxonomic-wrapped-container .wikipedia-summary {
+    max-height: 150px;
+    font-size: 12px;
   }
   
   .info-panel-content h4 {
@@ -827,7 +884,7 @@ generate_info_panel_css <- function() {
   }
 }
 </style>
-  ')
+  '))
 }
 
 # Generate JavaScript for info panel interactions
@@ -992,7 +1049,11 @@ document.addEventListener("click", function(event) {
   }
 });
 
-console.log("Info panel system initialized with server-side Wikipedia integration");
+// Removed JavaScript optimization code - dimensions are now pre-calculated server-side
+
+// Panel dimensions are pre-calculated server-side, no JavaScript optimization needed
+
+console.log("Info panel system initialized with server-side Wikipedia integration and pre-calculated dimensions");
 </script>
   ')
 }
@@ -1540,6 +1601,72 @@ get_geological_period <- function(age_mya) {
   if (age_mya <= 485) return("Ordovician")
   if (age_mya <= 541) return("Cambrian")
   return("Precambrian")
+}
+
+# Pre-calculated dimension functions for info panels
+# Eliminates race conditions by calculating dimensions server-side
+
+# Calculate optimal text column width based on character count
+# Uses formula from font metrics research: Arial 13px, line-height 1.4
+calculate_text_column_width <- function(character_count) {
+  if (is.null(character_count) || is.na(character_count) || character_count <= 0) {
+    return(300)  # Default width for empty or invalid input
+  }
+
+  # Formula: Total Characters * 0.897
+  # Based on: 9 lines max, 7.02px average character width, 15% safety margin
+  calculated_width <- character_count * 0.897
+
+  # Apply min/max constraints for reasonable layout
+  min_width <- 250
+  max_width <- 600
+
+  final_width <- max(min_width, min(max_width, calculated_width))
+
+  # Round to nearest 10px for cleaner CSS
+  return(round(final_width / 10) * 10)
+}
+
+# Calculate total info panel width from components
+calculate_total_panel_width <- function(text_column_width) {
+  image_width <- 200  # Fixed image width
+  gap_width <- 12     # Gap between image and text
+  padding <- 40       # Panel padding (20px each side)
+  margin <- 24        # Additional margins and borders
+
+  total_width <- image_width + text_column_width + gap_width + padding + margin
+
+  # Apply reasonable max width constraint
+  max_panel_width <- 1200
+
+  return(min(total_width, max_panel_width))
+}
+
+# Extract dimensions from API data for pre-calculation
+extract_content_dimensions <- function(wikipedia_intro, image_data = NULL) {
+  # Calculate text width from Wikipedia character count
+  text_length <- if (!is.null(wikipedia_intro) && is.character(wikipedia_intro)) {
+    nchar(wikipedia_intro)
+  } else {
+    300  # Default character count assumption
+  }
+
+  text_width <- calculate_text_column_width(text_length)
+
+  # Image dimensions (Unsplash already provides these, but we fix at 200px for layout)
+  image_width <- 200
+  image_height <- 200
+
+  # Calculate total panel dimensions
+  panel_width <- calculate_total_panel_width(text_width)
+
+  return(list(
+    text_column_width = text_width,
+    image_width = image_width,
+    image_height = image_height,
+    panel_width = panel_width,
+    character_count = text_length
+  ))
 }
 
 cat("Info panel system functions loaded successfully\n")
