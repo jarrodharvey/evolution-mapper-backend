@@ -42,6 +42,7 @@ source("functions/rotl_tree_generation.R")
 source("functions/datelife_tree_generation.R")
 source("functions/hybrid_tree_generation.R")
 source("functions/wikipedia_api.R")
+source("functions/attribution_extractor.R")
 
 # Required libraries
 library(DBI)
@@ -1082,11 +1083,11 @@ function(progress_token = NULL) {
       note = "Provide a valid progress token obtained from /api/get_progress_token"
     ))
   }
-  
+
   tryCatch({
     # Create progress file path
     progress_file <- paste0("progress/", progress_token, ".json")
-    
+
     # Check if file exists
     if (!file.exists(progress_file)) {
       return(list(
@@ -1096,18 +1097,52 @@ function(progress_token = NULL) {
         note = "The progress token may have expired or is invalid"
       ))
     }
-    
+
     # Read and return raw progress data
     progress_data <- jsonlite::fromJSON(progress_file, simplifyVector = TRUE)
-    
+
     # Return the raw progress file content
     return(progress_data)
-    
+
   }, error = function(e) {
     return(list(
       success = FALSE,
       error = paste("Error reading progress data:", conditionMessage(e)),
       progress_token = progress_token
+    ))
+  })
+}
+
+#* Get attribution information for all cached images and silhouettes
+#* @get /api/attributions
+function() {
+  tryCatch({
+    api_log_info("Processing attribution data request...")
+
+    # Get all attribution data from cache
+    attribution_data <- get_all_attributions()
+
+    # Structure response for API consumption
+    response <- list(
+      success = TRUE,
+      timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+      summary = attribution_data$summary,
+      phylopic_attributions = attribution_data$phylopic,
+      unsplash_attributions = attribution_data$unsplash
+    )
+
+    api_log_info(paste("Attribution data retrieved successfully:",
+                      attribution_data$summary$phylopic_count, "PhyloPic +",
+                      attribution_data$summary$unsplash_count, "Unsplash"))
+
+    return(response)
+
+  }, error = function(e) {
+    api_log_error(paste("Error in /api/attributions:", e$message))
+    return(list(
+      success = FALSE,
+      error = paste("Attribution retrieval failed:", e$message),
+      timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
     ))
   })
 }
