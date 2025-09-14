@@ -1556,13 +1556,27 @@ create_hybrid_tree_visualization <- function(network_data, request_id = NULL, pr
     stringsAsFactors = FALSE
   )
   
-  # Add color mapping using centralized color configuration
-  tree_data$Color <- sapply(1:nrow(tree_data), function(i) {
+  # Add color mapping using new adaptive ancestral node coloring system
+  tree_data$Color <- character(nrow(tree_data))
+
+  # Get ancestral node colors using new system
+  ancestral_colors <- get_ancestral_node_color(network_data)
+
+  # Assign colors to each row
+  ancestral_idx <- 1
+  for (i in 1:nrow(tree_data)) {
     node_type <- tree_data$NodeType[i]
-    has_age <- tree_data$HasAge[i]
-    
-    get_node_color(node_type, has_age)
-  })
+
+    if (node_type %in% c("taxonomic", "ancestor")) {
+      # Use new ancestral coloring system
+      tree_data$Color[i] <- ancestral_colors[ancestral_idx]
+      ancestral_idx <- ancestral_idx + 1
+    } else {
+      # Use original system for root and species
+      has_age <- tree_data$HasAge[i]
+      tree_data$Color[i] <- get_node_color(node_type, has_age)
+    }
+  }
   update_progress_internal("preparing_tree_structure", "completed")
   
   # Step 5.3: Create base tree widget
