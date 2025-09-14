@@ -8,7 +8,7 @@ library(base64enc)
 # Source shared logging configuration
 source("functions/logging_config.R")
 
-# Main function to fetch random Unsplash image for a taxonomic group
+# Main function to fetch relevant Unsplash image for a taxonomic group
 get_unsplash_random_image <- function(taxonomic_group, target_width = 800) {
   if (is.null(taxonomic_group) || is.na(taxonomic_group) || taxonomic_group == "") {
     return(list(success = FALSE, error = "No taxonomic group provided"))
@@ -28,14 +28,15 @@ get_unsplash_random_image <- function(taxonomic_group, target_width = 800) {
     # Clean and format the taxonomic group name for Unsplash search
     search_query <- clean_taxonomic_name_for_unsplash(taxonomic_group)
 
-    # Make API request to Unsplash
-    api_url <- "https://api.unsplash.com/photos/random"
+    # Make API request to Unsplash search endpoint (ranked by relevance)
+    api_url <- "https://api.unsplash.com/search/photos"
 
     response <- request(api_url) |>
       req_url_query(
         query = search_query,
         orientation = "squarish",   # Prefer squarish for better thumbnail display
-        content_filter = "high"     # High quality content filter
+        content_filter = "high",    # High quality content filter
+        per_page = 1                # Only need the most relevant result
       ) |>
       req_headers(
         Authorization = paste("Client-ID", access_key),
@@ -64,7 +65,20 @@ get_unsplash_random_image <- function(taxonomic_group, target_width = 800) {
       ))
     }
 
-    image_data <- resp_body_json(response)
+    search_results <- resp_body_json(response)
+
+    # Check if we have any results
+    if (search_results$total == 0 || length(search_results$results) == 0) {
+      return(list(
+        success = FALSE,
+        error = paste("No images found for:", search_query),
+        taxonomic_group = taxonomic_group,
+        search_query = search_query
+      ))
+    }
+
+    # Get the most relevant image (first result)
+    image_data <- search_results$results[[1]]
 
     # Extract image information
     image_url <- get_sized_image_url(image_data$urls, target_width)
