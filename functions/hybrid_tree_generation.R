@@ -757,12 +757,22 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
     final_species_count <- nrow(valid_species)
     species_with_ages <- final_species_count - length(species_without_ages_scientific)
     coverage_type <- if (length(species_without_ages_scientific) == 0) "complete" else "partial"
+
+    # Determine appropriate legend type based on age data coverage
+    legend_type <- if (species_with_ages == 0) {
+      "no_dates"  # No species have age data
+    } else if (length(species_without_ages_scientific) == 0) {
+      "all_dates"  # All species have age data
+    } else {
+      "mixed"  # Some species have age data, some don't
+    }
     
     api_log_info(paste("[", request_id, "] Age coverage analysis complete:", sep=""))
     api_log_info(paste("[", request_id, "]   Final tree species count:", final_species_count))
     api_log_info(paste("[", request_id, "]   Species with ages:", species_with_ages, "/", final_species_count))
     api_log_info(paste("[", request_id, "]   Species without ages:", length(species_without_ages_scientific)))
     api_log_info(paste("[", request_id, "]   Coverage type:", coverage_type))
+    api_log_info(paste("[", request_id, "]   Legend type:", legend_type))
     
     # Also report dropped species for transparency
     if (length(dropped_common_names) > 0) {
@@ -792,7 +802,8 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
       # Add dropped species fields for pruned OTT ID recovery
       dropped_common_names = dropped_common_names,
       dropped_scientific_names = dropped_scientific_names,
-      coverage = coverage_type
+      coverage = coverage_type,
+      legend_type = legend_type
     ))
     
   }, error = function(e) {
@@ -804,7 +815,8 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
       input_common_names = if(exists("common_names")) common_names else c(),
       input_scientific_names = if(exists("scientific_names")) scientific_names else c(),
       missing_common_names = c(),  # Initialize empty for frontend compatibility
-      missing_scientific_names = c()  # Initialize empty for frontend compatibility
+      missing_scientific_names = c(),  # Initialize empty for frontend compatibility
+      legend_type = "mixed"  # Default to mixed for error cases
     ))
   })
 }

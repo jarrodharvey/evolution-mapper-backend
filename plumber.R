@@ -208,13 +208,21 @@ function() {
 }
 
 #* Get legend information for tree visualization colors
+#* @param type:[character] Legend type - "no_dates", "all_dates", or "mixed" (default: "mixed")
 #* @get /api/legend
-function() {
+function(type = "mixed") {
   source("functions/color_config.R")
-  
+
+  # Validate type parameter
+  valid_types <- c("no_dates", "all_dates", "mixed")
+  if (!type %in% valid_types) {
+    type <- "mixed"  # Default fallback
+  }
+
   list(
     success = TRUE,
-    legend = get_legend_data()
+    type = type,
+    legend = get_legend_data(type)
   )
 }
 

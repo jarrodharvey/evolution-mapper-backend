@@ -93,39 +93,155 @@ get_gradient_color <- function(node_type, age_scale) {
   )
 }
 
-#' Get legend data for all node types
+#' Get legend data based on tree type (no_dates, all_dates, or mixed)
+#' @param type The type of legend to generate
 #' @return List of legend entries with color information
-get_legend_data <- function() {
-  list(
-    list(
-      node_type = "root",
-      label = "Root Ancestor",
-      color = TREE_COLORS$root$hex,
-      color_name = TREE_COLORS$root$name,
-      description = TREE_COLORS$root$description
-    ),
-    list(
-      node_type = "ancestor",
-      label = "Evolutionary Ancestor",
-      color = TREE_COLORS$ancestor$hex,
-      color_name = TREE_COLORS$ancestor$name,
-      description = TREE_COLORS$ancestor$description
-    ),
-    list(
-      node_type = "taxonomic",
-      label = "Taxonomic Group",
-      color = TREE_COLORS$taxonomic$hex,
-      color_name = TREE_COLORS$taxonomic$name,
-      description = TREE_COLORS$taxonomic$description
-    ),
-    list(
-      node_type = "species",
-      label = "Species",
-      color = TREE_COLORS$species$hex,
-      color_name = TREE_COLORS$species$name,
-      description = TREE_COLORS$species$description
-    )
+get_legend_data <- function(type = "mixed") {
+  # Base legend items (always included)
+  legend_items <- list()
+
+  # Species - always included
+  legend_items[["species"]] <- list(
+    node_type = "species",
+    label = "Species",
+    color = TREE_COLORS$species$hex,
+    color_name = TREE_COLORS$species$name,
+    description = TREE_COLORS$species$description,
+    shape = "circle"
   )
+
+  # Common ancestor - always included
+  legend_items[["common_ancestor"]] <- list(
+    node_type = "root",
+    label = "Common Ancestor",
+    color = TREE_COLORS$root$hex,
+    color_name = TREE_COLORS$root$name,
+    description = TREE_COLORS$root$description,
+    shape = "circle"
+  )
+
+  # Unnamed taxonomic group circle - always included
+  legend_items[["taxonomic_circle"]] <- list(
+    node_type = "taxonomic",
+    label = "Unnamed Taxonomic Group",
+    color = TREE_COLORS$taxonomic$hex,
+    color_name = TREE_COLORS$taxonomic$name,
+    description = "Named taxonomic groups without specific silhouettes",
+    shape = "circle"
+  )
+
+  # PhyloPic silhouette - always included
+  phylopic_data <- get_legend_phylopic()
+  legend_items[["phylopic"]] <- list(
+    node_type = "phylopic",
+    label = "Ancestor within Named Taxonomic Group",
+    color = TREE_COLORS$taxonomic$hex,
+    color_name = TREE_COLORS$taxonomic$name,
+    description = "Ancestors with representative silhouettes from PhyloPic",
+    shape = "phylopic",
+    phylopic_data = phylopic_data
+  )
+
+  # Type-specific additions
+  if (type %in% c("all_dates", "mixed")) {
+    # Add gradient colors for trees with age data
+    legend_items[["oldest_ancestor"]] <- list(
+      node_type = "ancestor_old",
+      label = "Oldest Ancestor",
+      color = TREE_COLORS$viridis_old$hex,
+      color_name = TREE_COLORS$viridis_old$name,
+      description = TREE_COLORS$viridis_old$description,
+      shape = "circle"
+    )
+
+    legend_items[["youngest_ancestor"]] <- list(
+      node_type = "ancestor_young",
+      label = "Youngest Ancestor",
+      color = TREE_COLORS$viridis_young$hex,
+      color_name = TREE_COLORS$viridis_young$name,
+      description = TREE_COLORS$viridis_young$description,
+      shape = "circle"
+    )
+  }
+
+  if (type == "mixed") {
+    # Add gray color for ancestors without age data in mixed scenarios
+    legend_items[["no_age_ancestor"]] <- list(
+      node_type = "ancestor_no_age",
+      label = "Ancestor without Age Data",
+      color = TREE_COLORS$no_age_mixed$hex,
+      color_name = TREE_COLORS$no_age_mixed$name,
+      description = TREE_COLORS$no_age_mixed$description,
+      shape = "circle"
+    )
+  }
+
+  # Convert to list format (remove names for consistent array structure)
+  return(as.list(legend_items))
+}
+
+#' Get a random PhyloPic silhouette for legend display
+#' @return List with PhyloPic data or error information
+get_legend_phylopic <- function() {
+  # Try to get a cached PhyloPic from a well-known taxonomic group
+  test_groups <- c("Mammalia", "Chordata", "Primates", "Aves", "Canidae")
+
+  tryCatch({
+    # Source required functions
+    source("functions/phylopic_silhouettes.R", local = TRUE)
+
+    # Try to load cached functions for better performance
+    if (file.exists("functions/cached_api_functions.R")) {
+      source("functions/cached_api_functions.R", local = TRUE)
+      use_cached <- exists("cached_get_random_silhouette_uuid", mode = "function")
+    } else {
+      use_cached <- FALSE
+    }
+
+    # Try each test group until we find one with a silhouette
+    for (group in test_groups) {
+      if (use_cached) {
+        uuid <- cached_get_random_silhouette_uuid(group)
+      } else {
+        uuid <- get_random_silhouette_uuid(group)
+      }
+
+      if (!is.null(uuid)) {
+        # Get silhouette data
+        result <- get_silhouette_for_node_replacement(
+          taxonomic_name = group,
+          target_size = 35,
+          use_cache = use_cached,
+          inherited_color = TREE_COLORS$taxonomic$hex
+        )
+
+        if (result$success) {
+          return(list(
+            success = TRUE,
+            taxonomic_group = group,
+            data_url = result$data_url,
+            uuid = result$uuid,
+            attribution = result$attribution
+          ))
+        }
+      }
+    }
+
+    # If we get here, no silhouettes were found
+    return(list(
+      success = FALSE,
+      error = "No PhyloPic silhouettes available for legend",
+      fallback_shape = "circle"
+    ))
+
+  }, error = function(e) {
+    # Return error information for debugging
+    return(list(
+      success = FALSE,
+      error = paste("PhyloPic legend generation failed:", e$message),
+      fallback_shape = "circle"
+    ))
+  })
 }
 
 #' Get ancestral node colors using new adaptive coloring system
