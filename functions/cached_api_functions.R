@@ -18,6 +18,8 @@ memoised_get_random_silhouette_uuid <- memoise(get_random_silhouette_uuid, cache
 memoised_get_wikipedia_main_image <- memoise(get_wikipedia_main_image, cache = wikipedia_images_cache)
 memoised_get_unsplash_random_image <- memoise(get_unsplash_random_image, cache = unsplash_images_cache)
 memoised_get_chatgpt_summary <- memoise(get_chatgpt_summary, cache = chatgpt_summary_cache)
+memoised_get_chatgpt_image_query <- memoise(get_chatgpt_image_query, cache = chatgpt_summary_cache)
+memoised_get_chatgpt_image_selection <- memoise(get_chatgpt_image_selection, cache = chatgpt_summary_cache)
 
 # Wikipedia functions with cache hit/miss logging
 #
@@ -224,6 +226,68 @@ cached_get_chatgpt_summary <- function(taxonomic_group) {
   return(result)
 }
 
+# ChatGPT Image Query functions with cache hit/miss logging
+#
+# Enhanced ChatGPT image query function with cache logging
+cached_get_chatgpt_image_query <- function(taxonomic_group, wikipedia_summary) {
+  cache_stats_before <- chatgpt_summary_cache$size()
+
+  api_log_info(paste("ChatGPT Image Query Cache lookup for", taxonomic_group))
+
+  # Ensure required functions are available in this context
+  tryCatch({
+    result <- memoised_get_chatgpt_image_query(taxonomic_group, wikipedia_summary)
+  }, error = function(e) {
+    # If memoised function fails due to missing dependencies, call original function directly
+    api_log_warn(paste("Memoised ChatGPT image query function failed, calling original:", e$message))
+    # Re-source the openai functions to ensure they're available
+    source("functions/openai_summary.R", local = TRUE)
+    result <- get_chatgpt_image_query(taxonomic_group, wikipedia_summary)
+    return(result)
+  })
+
+  cache_stats_after <- chatgpt_summary_cache$size()
+
+  if (cache_stats_after > cache_stats_before) {
+    api_log_info(paste("ChatGPT Image Query Cache MISS - fetched from API for", taxonomic_group))
+  } else {
+    api_log_info(paste("ChatGPT Image Query Cache HIT - using cached query for", taxonomic_group))
+  }
+
+  return(result)
+}
+
+# ChatGPT Image Selection functions with cache hit/miss logging
+#
+# ChatGPT image selection function with cache logging
+cached_get_chatgpt_image_selection <- function(taxonomic_group, wikipedia_summary, image_descriptions) {
+  cache_stats_before <- chatgpt_summary_cache$size()
+
+  api_log_info(paste("ChatGPT Image Selection Cache lookup for", taxonomic_group))
+
+  # Ensure required functions are available in this context
+  tryCatch({
+    result <- memoised_get_chatgpt_image_selection(taxonomic_group, wikipedia_summary, image_descriptions)
+  }, error = function(e) {
+    # If memoised function fails due to missing dependencies, call original function directly
+    api_log_warn(paste("Memoised ChatGPT image selection function failed, calling original:", e$message))
+    # Re-source the openai functions to ensure they're available
+    source("functions/openai_summary.R", local = TRUE)
+    result <- get_chatgpt_image_selection(taxonomic_group, wikipedia_summary, image_descriptions)
+    return(result)
+  })
+
+  cache_stats_after <- chatgpt_summary_cache$size()
+
+  if (cache_stats_after > cache_stats_before) {
+    api_log_info(paste("ChatGPT Image Selection Cache MISS - fetched from API for", taxonomic_group))
+  } else {
+    api_log_info(paste("ChatGPT Image Selection Cache HIT - using cached selection for", taxonomic_group))
+  }
+
+  return(result)
+}
+
 # Note: Info panel generation functions are cached within info_panel_system.R
 # to avoid circular dependencies. The core API functions above provide the 
 # main caching benefits.
@@ -296,6 +360,8 @@ api_log_info("  cached_get_wikipedia_main_image() - Wikipedia image function")
 api_log_info("  cached_get_unsplash_random_image() - Unsplash image function")
 api_log_info("  cached_get_silhouette_data() - Main PhyloPic function")
 api_log_info("  cached_get_chatgpt_summary() - ChatGPT taxonomic summary function")
+api_log_info("  cached_get_chatgpt_image_query() - ChatGPT image query function with Wikipedia context")
+api_log_info("  cached_get_chatgpt_image_selection() - ChatGPT image selection from multiple options")
 api_log_info("  clear_all_caches() - Clear all cached data")
 api_log_info("  get_cache_stats() - View cache statistics")
 api_log_info("  prune_caches() - Remove expired entries")
