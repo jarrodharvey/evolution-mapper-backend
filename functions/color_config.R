@@ -123,10 +123,10 @@ get_legend_data <- function(type = "mixed") {
   # Unnamed taxonomic group circle - always included
   legend_items[["taxonomic_circle"]] <- list(
     node_type = "taxonomic",
-    label = "Unnamed Taxonomic Group",
+    label = "Ancestor not in a named taxonomic group",
     color = TREE_COLORS$taxonomic$hex,
     color_name = TREE_COLORS$taxonomic$name,
-    description = "Named taxonomic groups without specific silhouettes",
+    description = "Named taxonomic groups",
     shape = "circle"
   )
 
@@ -137,7 +137,7 @@ get_legend_data <- function(type = "mixed") {
     label = "Ancestor within Named Taxonomic Group",
     color = TREE_COLORS$taxonomic$hex,
     color_name = TREE_COLORS$taxonomic$name,
-    description = "Ancestors with representative silhouettes from PhyloPic",
+    description = "Ancestors belonging to named taxonomic groups",
     shape = "phylopic",
     phylopic_data = phylopic_data
   )
