@@ -142,15 +142,34 @@ while IFS= read -r taxonomic_group; do
                 fi
             fi
 
-            # Check for PhyloPic fallback
-            phylopic_fallback=$(grep -c "PhyloPic fallback.*$latest_response" logs/api.log 2>/dev/null || echo "0")
-            if [[ "$phylopic_fallback" -gt 0 ]]; then
-                echo "  🦕 Result: PhyloPic fallback (no topic matches)"
+            # Check for Pixabay fallback (NEW)
+            pixabay_fallback=$(grep -c "Using Pixabay fallback.*$latest_response" logs/api.log 2>/dev/null || echo "0")
+            phylopic_fallback=$(grep -c "PhyloPic.*fallback.*$latest_response" logs/api.log 2>/dev/null || echo "0")
+
+            if [[ "$pixabay_fallback" -gt 0 ]]; then
+                echo "  🎨 Result: Pixabay image fallback (Unsplash failed)"
+            elif [[ "$phylopic_fallback" -gt 0 ]]; then
+                echo "  🦕 Result: PhyloPic fallback (Unsplash and Pixabay failed)"
             else
                 echo "  📸 Result: Unsplash image selected"
             fi
         else
             echo "  ⚠️  No Unsplash search data found"
+        fi
+    fi
+
+    # Check for image fallbacks even when Unsplash search data is missing
+    if [[ -n "$latest_response" ]]; then
+        # Check for direct Pixabay or PhyloPic usage (when Unsplash completely failed or wasn't attempted)
+        pixabay_direct=$(grep -c "Pixabay.*success.*$latest_response" logs/api.log 2>/dev/null || echo "0")
+        phylopic_direct=$(grep -c "PhyloPic.*success.*$latest_response" logs/api.log 2>/dev/null || echo "0")
+        pixabay_fallback_alt=$(grep -c "Using Pixabay.*for.*$taxonomic_group" logs/api.log 2>/dev/null || echo "0")
+        phylopic_fallback_alt=$(grep -c "Using PhyloPic.*for.*$taxonomic_group" logs/api.log 2>/dev/null || echo "0")
+
+        if [[ "$pixabay_direct" -gt 0 || "$pixabay_fallback_alt" -gt 0 ]]; then
+            echo "  🎨 Result: Pixabay image used (direct fallback)"
+        elif [[ "$phylopic_direct" -gt 0 || "$phylopic_fallback_alt" -gt 0 ]]; then
+            echo "  🦕 Result: PhyloPic used (final fallback)"
         fi
     fi
 
@@ -173,7 +192,8 @@ total_selection=$(grep -c "\\[CHATGPT-SELECTION\\]" logs/chatgpt.log 2>/dev/null
 total_tokens=$(grep "tokens:" logs/chatgpt.log 2>/dev/null | sed -n 's/.*tokens: \([0-9]*\).*/\1/p' | awk '{sum+=$1} END {print sum+0}')
 total_retries=$(grep -c "CHATGPT-RETRY" logs/chatgpt.log 2>/dev/null || echo "0")
 total_unsplash=$(grep -c "Unsplash search" logs/api.log 2>/dev/null || echo "0")
-total_phylopic=$(grep -c "PhyloPic fallback" logs/api.log 2>/dev/null || echo "0")
+total_pixabay=$(grep -c "Pixabay.*fallback" logs/api.log 2>/dev/null || echo "0")
+total_phylopic=$(grep -c "PhyloPic.*fallback" logs/api.log 2>/dev/null || echo "0")
 
 echo "  Taxonomic groups processed: $group_count"
 echo "  Summary operations: $total_summary"
@@ -182,14 +202,16 @@ echo "  Selection operations: $total_selection"
 echo "  Total tokens used: $total_tokens"
 echo "  Validation retries: $total_retries"
 echo "  Unsplash searches: $total_unsplash"
+echo "  Pixabay searches: $total_pixabay"
 echo "  PhyloPic fallbacks: $total_phylopic"
 
 # Image source breakdown
-if [[ "$total_unsplash" -gt 0 ]] || [[ "$total_phylopic" -gt 0 ]]; then
+if [[ "$total_unsplash" -gt 0 ]] || [[ "$total_pixabay" -gt 0 ]] || [[ "$total_phylopic" -gt 0 ]]; then
     echo ""
     echo "🖼️  IMAGE SOURCE BREAKDOWN:"
+    total_images=$((total_unsplash + total_pixabay + total_phylopic))
+
     if [[ "$total_unsplash" -gt 0 ]]; then
-        total_images=$((total_unsplash + total_phylopic))
         if [[ "$total_images" -gt 0 ]]; then
             unsplash_percent=$(echo "scale=1; $total_unsplash * 100 / $total_images" | bc -l 2>/dev/null || echo "N/A")
             echo "  📸 Unsplash photos: $total_unsplash (${unsplash_percent}%)"
@@ -197,8 +219,15 @@ if [[ "$total_unsplash" -gt 0 ]] || [[ "$total_phylopic" -gt 0 ]]; then
             echo "  📸 Unsplash photos: $total_unsplash"
         fi
     fi
+    if [[ "$total_pixabay" -gt 0 ]]; then
+        if [[ "$total_images" -gt 0 ]]; then
+            pixabay_percent=$(echo "scale=1; $total_pixabay * 100 / $total_images" | bc -l 2>/dev/null || echo "N/A")
+            echo "  🎨 Pixabay photos: $total_pixabay (${pixabay_percent}%)"
+        else
+            echo "  🎨 Pixabay photos: $total_pixabay"
+        fi
+    fi
     if [[ "$total_phylopic" -gt 0 ]]; then
-        total_images=$((total_unsplash + total_phylopic))
         if [[ "$total_images" -gt 0 ]]; then
             phylopic_percent=$(echo "scale=1; $total_phylopic * 100 / $total_images" | bc -l 2>/dev/null || echo "N/A")
             echo "  🦕 PhyloPic silhouettes: $total_phylopic (${phylopic_percent}%)"

@@ -7,6 +7,7 @@ source("functions/wikipedia_api.R")
 source("functions/phylopic_silhouettes.R")
 source("functions/wikipedia_images.R")
 source("functions/unsplash_images.R")
+source("functions/pixabay_images.R")
 source("functions/openai_summary.R")
 
 # Create memoised functions without logging first
@@ -17,6 +18,7 @@ memoised_get_silhouette_data <- memoise(get_silhouette_data, cache = phylopic_ca
 memoised_get_random_silhouette_uuid <- memoise(get_random_silhouette_uuid, cache = phylopic_cache)
 memoised_get_wikipedia_main_image <- memoise(get_wikipedia_main_image, cache = wikipedia_images_cache)
 memoised_get_unsplash_random_image <- memoise(get_unsplash_random_image, cache = unsplash_images_cache)
+memoised_get_pixabay_random_image <- memoise(get_pixabay_random_image, cache = pixabay_images_cache)
 memoised_get_chatgpt_summary <- memoise(get_chatgpt_summary, cache = chatgpt_summary_cache)
 memoised_get_chatgpt_image_selection <- memoise(get_chatgpt_image_selection, cache = chatgpt_summary_cache)
 memoised_get_chatgpt_common_name <- memoise(get_chatgpt_common_name, cache = chatgpt_summary_cache)
@@ -195,6 +197,37 @@ cached_get_unsplash_random_image <- function(taxonomic_group, target_width = 800
   return(result)
 }
 
+# Pixabay Image functions with cache hit/miss logging
+#
+# Main Pixabay image function with cache logging
+cached_get_pixabay_random_image <- function(taxonomic_group, target_width = 200) {
+  cache_stats_before <- pixabay_images_cache$size()
+
+  api_log_info(paste("Pixabay Image Cache lookup for", taxonomic_group))
+
+  # Ensure required functions are available in this context
+  tryCatch({
+    result <- memoised_get_pixabay_random_image(taxonomic_group, target_width)
+  }, error = function(e) {
+    # If memoised function fails due to missing dependencies, call original function directly
+    api_log_warn(paste("Memoised Pixabay image function failed, calling original:", e$message))
+    # Re-source the pixabay image functions to ensure they're available
+    source("functions/pixabay_images.R", local = TRUE)
+    result <- get_pixabay_random_image(taxonomic_group, target_width)
+    return(result)
+  })
+
+  cache_stats_after <- pixabay_images_cache$size()
+
+  if (cache_stats_after > cache_stats_before) {
+    api_log_info(paste("Pixabay Image Cache MISS - fetched from API for", taxonomic_group))
+  } else {
+    api_log_info(paste("Pixabay Image Cache HIT - using cached image for", taxonomic_group))
+  }
+
+  return(result)
+}
+
 # ChatGPT Summary functions with cache hit/miss logging
 #
 # Main ChatGPT summary function with cache logging
@@ -359,6 +392,7 @@ api_log_info("Available cached functions:")
 api_log_info("  cached_get_wikipedia_intro() - Main Wikipedia function")
 api_log_info("  cached_get_wikipedia_main_image() - Wikipedia image function")
 api_log_info("  cached_get_unsplash_random_image() - Unsplash image function")
+api_log_info("  cached_get_pixabay_random_image() - Pixabay image function")
 api_log_info("  cached_get_silhouette_data() - Main PhyloPic function")
 api_log_info("  cached_get_chatgpt_summary() - ChatGPT taxonomic summary function")
 api_log_info("  cached_get_chatgpt_image_selection() - ChatGPT image selection from multiple options")

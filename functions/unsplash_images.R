@@ -44,8 +44,8 @@ get_unsplash_random_image <- function(taxonomic_group, target_width = 800) {
     }
 
     if (is.null(wikipedia_result) || !wikipedia_result$success) {
-      api_log_warn(paste("Wikipedia lookup failed for", taxonomic_group, "- falling back to PhyloPic"))
-      return(fallback_to_phylopic(taxonomic_group))
+      api_log_warn(paste("Wikipedia lookup failed for", taxonomic_group, "- falling back to Pixabay"))
+      return(fallback_to_pixabay(taxonomic_group))
     }
 
     # Step 2: Get common name for better search results
@@ -92,8 +92,8 @@ get_unsplash_random_image <- function(taxonomic_group, target_width = 800) {
         paste("Unsplash API error:", resp_status(response))
       }
 
-      api_log_warn(paste("Unsplash API failed:", error_msg, "- falling back to PhyloPic"))
-      return(fallback_to_phylopic(taxonomic_group))
+      api_log_warn(paste("Unsplash API failed:", error_msg, "- falling back to Pixabay"))
+      return(fallback_to_pixabay(taxonomic_group))
     }
 
     response_data <- resp_body_json(response)
@@ -102,8 +102,8 @@ get_unsplash_random_image <- function(taxonomic_group, target_width = 800) {
     photos <- response_data$results
 
     if (!is.list(photos) || length(photos) == 0) {
-      api_log_warn(paste("No search results returned for", search_query, "- falling back to PhyloPic"))
-      return(fallback_to_phylopic(taxonomic_group))
+      api_log_warn(paste("No search results returned for", search_query, "- falling back to Pixabay"))
+      return(fallback_to_pixabay(taxonomic_group))
     }
 
     # Step 4: Filter by acceptable topic submissions
@@ -138,10 +138,10 @@ get_unsplash_random_image <- function(taxonomic_group, target_width = 800) {
 
     api_log_info(paste("Found", length(photos), "total results,", length(filtered_photos), "match topic filters"))
 
-    # If no photos pass the topic filter, fallback to PhyloPic
+    # If no photos pass the topic filter, fallback to Pixabay
     if (length(filtered_photos) == 0) {
-      api_log_warn(paste("No photos match topic filters for", search_query, "- falling back to PhyloPic"))
-      return(fallback_to_phylopic(taxonomic_group))
+      api_log_warn(paste("No photos match topic filters for", search_query, "- falling back to Pixabay"))
+      return(fallback_to_pixabay(taxonomic_group))
     }
 
     # Step 5: Select one of the filtered results at random
@@ -178,15 +178,30 @@ get_unsplash_random_image <- function(taxonomic_group, target_width = 800) {
     ))
 
   }, error = function(e) {
-    api_log_error(paste("Error in Unsplash random selection:", conditionMessage(e), "- falling back to PhyloPic"))
-    return(fallback_to_phylopic(taxonomic_group))
+    api_log_error(paste("Error in Unsplash random selection:", conditionMessage(e), "- falling back to Pixabay"))
+    return(fallback_to_pixabay(taxonomic_group))
   })
 }
 
-# Helper function to fallback to PhyloPic when Unsplash fails
-fallback_to_phylopic <- function(taxonomic_group) {
+# Helper function to fallback to Pixabay when Unsplash fails
+fallback_to_pixabay <- function(taxonomic_group) {
+  if (exists("cached_get_pixabay_random_image")) {
+    api_log_info(paste("Using Pixabay fallback for", taxonomic_group))
+    pixabay_result <- cached_get_pixabay_random_image(taxonomic_group, target_width = 200)
+
+    if (pixabay_result$success) {
+      return(pixabay_result)  # Success - use Pixabay image
+    }
+  }
+
+  # If Pixabay fails, fall back to PhyloPic (final fallback)
+  return(fallback_to_phylopic_final(taxonomic_group))
+}
+
+# Helper function for final PhyloPic fallback when both Unsplash and Pixabay fail
+fallback_to_phylopic_final <- function(taxonomic_group) {
   if (exists("cached_get_silhouette_data")) {
-    api_log_info(paste("Using PhyloPic fallback for", taxonomic_group))
+    api_log_info(paste("Using PhyloPic final fallback for", taxonomic_group))
     silhouette_result <- cached_get_silhouette_data(taxonomic_group)
 
     if (silhouette_result$success) {
@@ -199,7 +214,7 @@ fallback_to_phylopic <- function(taxonomic_group) {
       return(list(
         success = TRUE,
         taxonomic_group = taxonomic_group,
-        selection_method = "phylopic_fallback",
+        selection_method = "phylopic_final_fallback",
         phylopic_uuid = silhouette_result$uuid,
         phylopic_url = silhouette_result$phylopic_url,
         attribution = silhouette_result$attribution,
@@ -209,10 +224,10 @@ fallback_to_phylopic <- function(taxonomic_group) {
     }
   }
 
-  # Final fallback - complete failure
+  # Complete failure - no images available from any source
   return(list(
     success = FALSE,
-    error = "Both Unsplash and PhyloPic methods failed",
+    error = "All image sources failed (Unsplash, Pixabay, PhyloPic)",
     taxonomic_group = taxonomic_group
   ))
 }
