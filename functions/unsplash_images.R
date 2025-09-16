@@ -19,7 +19,7 @@ tryCatch({
   # ChatGPT functions not yet loaded
 })
 
-# Main function to fetch appropriate Unsplash image using ChatGPT selection from random photos
+# Main function to fetch appropriate Unsplash image using creative common name search
 get_unsplash_random_image <- function(taxonomic_group, target_width = 800) {
   if (is.null(taxonomic_group) || is.na(taxonomic_group) || taxonomic_group == "") {
     return(list(success = FALSE, error = "No taxonomic group provided"))
@@ -48,15 +48,29 @@ get_unsplash_random_image <- function(taxonomic_group, target_width = 800) {
       return(fallback_to_phylopic(taxonomic_group))
     }
 
-    # Step 2: Fetch 5 random photos from Unsplash using taxonomic group as query
-    api_log_info(paste("Fetching 5 random photos from Unsplash for", taxonomic_group))
+    # Step 2: Get common name for better search results
+    search_query <- taxonomic_group  # Default fallback
+    if (exists("cached_get_chatgpt_common_name")) {
+      api_log_info(paste("Getting common name for", taxonomic_group))
+      common_name_result <- cached_get_chatgpt_common_name(taxonomic_group)
 
-    api_url <- "https://api.unsplash.com/photos/random"
+      if (common_name_result$success && !is.null(common_name_result$common_name)) {
+        search_query <- common_name_result$common_name
+        api_log_info(paste("Using common name for search:", search_query))
+      } else {
+        api_log_info(paste("Common name conversion failed, using original:", taxonomic_group))
+      }
+    }
+
+    # Step 3: Search for photos from Unsplash using common name - get multiple results for filtering
+    api_log_info(paste("Searching for photos from Unsplash for", search_query))
+
+    api_url <- "https://api.unsplash.com/search/photos"
 
     response <- request(api_url) |>
       req_url_query(
-        query = taxonomic_group,
-        count = 5,                  # Get 5 random photos
+        query = search_query,
+        per_page = 30,             # Get multiple results for topic filtering
         orientation = "squarish",   # Prefer squarish for better thumbnail display
         content_filter = "high"     # High quality content filter
       ) |>
@@ -73,7 +87,7 @@ get_unsplash_random_image <- function(taxonomic_group, target_width = 800) {
       error_msg <- if (resp_status(response) == 403) {
         "Rate limit exceeded or access denied"
       } else if (resp_status(response) == 404) {
-        paste("No random photos found for:", taxonomic_group)
+        paste("No search results found for:", search_query)
       } else {
         paste("Unsplash API error:", resp_status(response))
       }
@@ -82,72 +96,86 @@ get_unsplash_random_image <- function(taxonomic_group, target_width = 800) {
       return(fallback_to_phylopic(taxonomic_group))
     }
 
-    random_photos <- resp_body_json(response)
+    response_data <- resp_body_json(response)
 
-    # Ensure we have an array of photos
-    if (!is.list(random_photos) || length(random_photos) == 0) {
-      api_log_warn(paste("No random photos returned for", taxonomic_group, "- falling back to PhyloPic"))
+    # Extract photos from search results
+    photos <- response_data$results
+
+    if (!is.list(photos) || length(photos) == 0) {
+      api_log_warn(paste("No search results returned for", search_query, "- falling back to PhyloPic"))
       return(fallback_to_phylopic(taxonomic_group))
     }
 
-    # Step 3: Extract image descriptions for ChatGPT
-    image_descriptions <- sapply(random_photos, function(photo) {
-      photo$alt_description %||% photo$description %||% "No description available"
-    })
+    # Step 4: Filter by acceptable topic submissions
+    acceptable_topics <- c("animals", "nature", "wildlife", "birds", "marine-life", "insects",
+                          "plants", "forest", "ocean", "freshwater", "mountains", "savanna",
+                          "macro", "zoology", "botany", "ecology", "aquatic-life", "wild-animals")
 
-    api_log_info(paste("Got", length(image_descriptions), "photo descriptions for ChatGPT selection"))
-
-    # Step 4: Use ChatGPT to select the most appropriate image
-    if (exists("cached_get_chatgpt_image_selection")) {
-      selection_result <- cached_get_chatgpt_image_selection(
-        taxonomic_group,
-        wikipedia_result$introduction,
-        image_descriptions
-      )
-
-      if (selection_result$success && is.numeric(selection_result$selection)) {
-        # ChatGPT selected a specific image
-        selected_index <- selection_result$selection
-        selected_photo <- random_photos[[selected_index]]
-
-        api_log_info(paste("ChatGPT selected image", selected_index, "for", taxonomic_group))
-
-        # Extract image information from selected photo
-        image_url <- get_sized_image_url(selected_photo$urls, target_width)
-        attribution <- format_unsplash_attribution(selected_photo)
-
-        return(list(
-          success = TRUE,
-          taxonomic_group = taxonomic_group,
-          selection_method = "chatgpt_random",
-          selected_index = selected_index,
-          chatgpt_response = selection_result$raw_response,
-          image_url = image_url,
-          image_width = selected_photo$width,
-          image_height = selected_photo$height,
-          photographer_name = selected_photo$user$name,
-          photographer_username = selected_photo$user$username,
-          photographer_url = selected_photo$user$links$html,
-          unsplash_url = selected_photo$links$html,
-          attribution = attribution,
-          image_id = selected_photo$id,
-          alt_description = selected_photo$alt_description %||% paste("Image of", taxonomic_group)
-        ))
-
-      } else if (selection_result$success && selection_result$selection == "no_match") {
-        # ChatGPT said no images are appropriate
-        api_log_info(paste("ChatGPT found no suitable matches for", taxonomic_group, "- falling back to PhyloPic"))
-        return(fallback_to_phylopic(taxonomic_group))
-      } else {
-        # ChatGPT selection failed
-        api_log_warn(paste("ChatGPT selection failed:", selection_result$error, "- falling back to PhyloPic"))
-        return(fallback_to_phylopic(taxonomic_group))
+    # Log all topics found in the search results for assessment
+    all_topics <- c()
+    for (photo in photos) {
+      if (!is.null(photo$topic_submissions) && length(photo$topic_submissions) > 0) {
+        photo_topics <- names(photo$topic_submissions)
+        all_topics <- c(all_topics, photo_topics)
       }
+    }
+    unique_topics <- unique(all_topics)
+    if (length(unique_topics) > 0) {
+      api_log_info(paste("Unsplash topics found for", search_query, ":", paste(sort(unique_topics), collapse = ", ")))
     } else {
-      # ChatGPT selection function not available, fallback to PhyloPic
-      api_log_warn(paste("ChatGPT selection function not available - falling back to PhyloPic"))
+      api_log_info(paste("No topic_submissions found in Unsplash results for", search_query))
+    }
+
+    filtered_photos <- Filter(function(photo) {
+      if (is.null(photo$topic_submissions) || length(photo$topic_submissions) == 0) {
+        return(FALSE)
+      }
+
+      # Check if any of the photo's topics match our acceptable topics
+      photo_topics <- names(photo$topic_submissions)
+      return(any(photo_topics %in% acceptable_topics))
+    }, photos)
+
+    api_log_info(paste("Found", length(photos), "total results,", length(filtered_photos), "match topic filters"))
+
+    # If no photos pass the topic filter, fallback to PhyloPic
+    if (length(filtered_photos) == 0) {
+      api_log_warn(paste("No photos match topic filters for", search_query, "- falling back to PhyloPic"))
       return(fallback_to_phylopic(taxonomic_group))
     }
+
+    # Step 5: Select one of the filtered results at random
+    selected_photo <- filtered_photos[[sample(length(filtered_photos), 1)]]
+
+    # Log which topics this photo matched
+    photo_topics <- names(selected_photo$topic_submissions)
+    matched_topics <- intersect(photo_topics, acceptable_topics)
+    api_log_info(paste("Randomly selected photo for", taxonomic_group, "(search query:", search_query, ") with topics:", paste(matched_topics, collapse = ", ")))
+
+    # Extract image information from selected photo
+    image_url <- get_sized_image_url(selected_photo$urls, target_width)
+    attribution <- format_unsplash_attribution(selected_photo)
+
+    return(list(
+      success = TRUE,
+      taxonomic_group = taxonomic_group,
+      selection_method = "topic_filtered_random",
+      search_query = search_query,
+      common_name_used = search_query != taxonomic_group,
+      total_results = length(photos),
+      filtered_results = length(filtered_photos),
+      matched_topics = matched_topics,
+      image_url = image_url,
+      image_width = selected_photo$width,
+      image_height = selected_photo$height,
+      photographer_name = selected_photo$user$name,
+      photographer_username = selected_photo$user$username,
+      photographer_url = selected_photo$user$links$html,
+      unsplash_url = selected_photo$links$html,
+      attribution = attribution,
+      image_id = selected_photo$id,
+      alt_description = selected_photo$alt_description %||% paste("Image of", search_query)
+    ))
 
   }, error = function(e) {
     api_log_error(paste("Error in Unsplash random selection:", conditionMessage(e), "- falling back to PhyloPic"))
@@ -240,7 +268,7 @@ format_unsplash_image_html <- function(image_data) {
     }
   }
 
-  # Handle regular Unsplash images (ChatGPT random selection)
+  # Handle regular Unsplash images (search first result)
   if (!is.null(image_data$image_url)) {
     # Create HTML for image display - let CSS and natural image size determine dimensions
     image_html <- paste0(

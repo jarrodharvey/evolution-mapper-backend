@@ -5,6 +5,7 @@ library(logger)
 
 # Define the namespace for all Evolution Mapper logging
 EVOLUTION_API_NAMESPACE <- "evolution.api"
+CHATGPT_NAMESPACE <- "chatgpt"
 
 # Configure the Evolution API logger
 configure_evolution_logging <- function() {
@@ -23,6 +24,12 @@ configure_evolution_logging <- function() {
   # Set threshold to INFO level
   log_threshold(INFO, namespace = EVOLUTION_API_NAMESPACE)
   
+  # Configure ChatGPT logger
+  log_appender(appender_file("logs/chatgpt.log", append = TRUE),
+               namespace = CHATGPT_NAMESPACE)
+  log_layout(layout_simple, namespace = CHATGPT_NAMESPACE)
+  log_threshold(INFO, namespace = CHATGPT_NAMESPACE)
+
   # Ensure logs directory exists
   if (!dir.exists("logs")) {
     dir.create("logs", recursive = TRUE)
@@ -40,6 +47,19 @@ api_log_warn <- function(message, ...) {
 
 api_log_error <- function(message, ...) {
   log_error(message, namespace = EVOLUTION_API_NAMESPACE, ...)
+}
+
+# Convenience functions for ChatGPT logging
+chatgpt_log_info <- function(message, ...) {
+  log_info(message, namespace = CHATGPT_NAMESPACE, ...)
+}
+
+chatgpt_log_warn <- function(message, ...) {
+  log_warn(message, namespace = CHATGPT_NAMESPACE, ...)
+}
+
+chatgpt_log_error <- function(message, ...) {
+  log_error(message, namespace = CHATGPT_NAMESPACE, ...)
 }
 
 # Initialize logging when this file is sourced
