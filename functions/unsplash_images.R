@@ -36,19 +36,7 @@ get_unsplash_random_image <- function(taxonomic_group, target_width = 800) {
       ))
     }
 
-    # Step 1: Get Wikipedia summary for ChatGPT context
-    wikipedia_result <- NULL
-    if (exists("cached_get_wikipedia_intro")) {
-      api_log_info(paste("Getting Wikipedia summary for", taxonomic_group))
-      wikipedia_result <- cached_get_wikipedia_intro(taxonomic_group, truncate_length = 500)
-    }
-
-    if (is.null(wikipedia_result) || !wikipedia_result$success) {
-      api_log_warn(paste("Wikipedia lookup failed for", taxonomic_group, "- falling back to Pixabay"))
-      return(fallback_to_pixabay(taxonomic_group))
-    }
-
-    # Step 2: Get common name for better search results
+    # Step 1: Get common name from ChatGPT first (this is the key step)
     search_query <- taxonomic_group  # Default fallback
     if (exists("cached_get_chatgpt_common_name")) {
       api_log_info(paste("Getting common name for", taxonomic_group))
@@ -60,6 +48,8 @@ get_unsplash_random_image <- function(taxonomic_group, target_width = 800) {
       } else {
         api_log_info(paste("Common name conversion failed, using original:", taxonomic_group))
       }
+    } else {
+      api_log_warn(paste("ChatGPT common name function not available, using taxonomic name:", taxonomic_group))
     }
 
     # Step 3: Search for photos from Unsplash using common name - get multiple results for filtering

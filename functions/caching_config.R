@@ -50,6 +50,13 @@ pixabay_images_cache <- cache_disk(
   max_age = 7 * 24 * 60 * 60  # 7 days (images change regularly but not daily)
 )
 
+# Wikimedia image cache - separate cache for Wikimedia/Wikipedia Commons API calls
+wikimedia_images_cache <- cache_disk(
+  dir = "cache/wikimedia_images/",
+  max_size = 500 * 1024^2,  # 500MB (high-quality images, stable source)
+  max_age = 60 * 24 * 60 * 60  # 60 days (Wikimedia content very stable)
+)
+
 # ChatGPT summary cache - separate cache for OpenAI API calls
 # No expiration since taxonomic summaries are static knowledge
 chatgpt_summary_cache <- cache_disk(
@@ -66,4 +73,5 @@ api_log_info(paste("  PhyloPic:", file.path(getwd(), "cache/phylopic/")))
 api_log_info(paste("  Wikipedia Images:", file.path(getwd(), "cache/wikipedia_images/")))
 api_log_info(paste("  Unsplash Images:", file.path(getwd(), "cache/unsplash_images/")))
 api_log_info(paste("  Pixabay Images:", file.path(getwd(), "cache/pixabay_images/")))
+api_log_info(paste("  Wikimedia Images:", file.path(getwd(), "cache/wikimedia_images/")))
 api_log_info(paste("  ChatGPT Summaries:", file.path(getwd(), "cache/chatgpt_summaries/")))

@@ -291,19 +291,24 @@ format_override_image_html <- function(override_result) {
   })
 }
 
-# Format combined image (Override → Unsplash → Pixabay → PhyloPic priority) and Wikipedia text section
+# Format combined image (Override → Wikimedia → Unsplash → Pixabay → PhyloPic priority) and Wikipedia text section
 format_combined_taxonomic_section <- function(node_data) {
   # Check for override image (highest priority)
   has_override_image <- !is.null(node_data$override_image_html) &&
                         !is.na(node_data$override_image_html) &&
                         nchar(as.character(node_data$override_image_html)) > 0
 
-  # Check for Unsplash image (secondary choice)
+  # Check for Wikimedia image (secondary priority)
+  has_wikimedia_image <- !is.null(node_data$wikimedia_image_html) &&
+                         !is.na(node_data$wikimedia_image_html) &&
+                         nchar(as.character(node_data$wikimedia_image_html)) > 0
+
+  # Check for Unsplash image (tertiary choice)
   has_unsplash_image <- !is.null(node_data$unsplash_image_html) &&
                         !is.na(node_data$unsplash_image_html) &&
                         nchar(as.character(node_data$unsplash_image_html)) > 0
 
-  # Check for Pixabay image (secondary choice)
+  # Check for Pixabay image (quaternary choice)
   has_pixabay_image <- !is.null(node_data$pixabay_image_html) &&
                        !is.na(node_data$pixabay_image_html) &&
                        nchar(as.character(node_data$pixabay_image_html)) > 0
@@ -319,6 +324,10 @@ format_combined_taxonomic_section <- function(node_data) {
                    nchar(as.character(node_data$wikipedia_summary)) > 0
   
   # Check for errors
+  has_wikimedia_image_error <- !is.null(node_data$wikimedia_image_error) &&
+                               !is.na(node_data$wikimedia_image_error) &&
+                               nchar(as.character(node_data$wikimedia_image_error)) > 0
+
   has_unsplash_image_error <- !is.null(node_data$unsplash_image_error) &&
                               !is.na(node_data$unsplash_image_error) &&
                               nchar(as.character(node_data$unsplash_image_error)) > 0
@@ -336,45 +345,57 @@ format_combined_taxonomic_section <- function(node_data) {
                         nchar(as.character(node_data$wikipedia_error)) > 0
   
   # Show section if we have any data OR errors to display
-  if (!has_override_image && !has_unsplash_image && !has_pixabay_image && !has_silhouette && !has_wikipedia &&
-      !has_unsplash_image_error && !has_pixabay_image_error && !has_silhouette_error && !has_wikipedia_error) {
+  if (!has_override_image && !has_wikimedia_image && !has_unsplash_image && !has_pixabay_image && !has_silhouette && !has_wikipedia &&
+      !has_wikimedia_image_error && !has_unsplash_image_error && !has_pixabay_image_error && !has_silhouette_error && !has_wikipedia_error) {
     return("")
   }
-  
+
   # Start the combined section
   combined_html <- '<div class="taxonomic-combined-section">'
-  
-  # Priority order: Override → Unsplash → Pixabay → PhyloPic
+
+  # Priority order: Override → Wikimedia → Unsplash → Pixabay → PhyloPic
   image_content <- ""
   if (has_override_image) {
     # Use override image (highest priority)
     image_content <- node_data$override_image_html
+  } else if (has_wikimedia_image) {
+    # Use Wikimedia image (secondary priority)
+    image_content <- node_data$wikimedia_image_html
   } else if (has_unsplash_image) {
-    # Use Unsplash image (secondary priority)
+    # Use Unsplash image (tertiary priority)
     image_content <- node_data$unsplash_image_html
   } else if (has_pixabay_image) {
-    # Use Pixabay image (tertiary priority)
+    # Use Pixabay image (quaternary priority)
     image_content <- node_data$pixabay_image_html
   } else if (has_silhouette) {
     # Fallback to PhyloPic silhouette (final fallback)
     image_content <- node_data$silhouette_html
-  } else if (has_unsplash_image_error && has_pixabay_image_error && has_silhouette_error) {
-    # All three image sources failed - show combined error
+  } else if (has_wikimedia_image_error && has_unsplash_image_error && has_pixabay_image_error && has_silhouette_error) {
+    # All four image sources failed - show combined error
     image_content <- paste0(
       '<div class="image-error" style="color: #e74c3c; font-size: 12px; font-style: italic; padding: 8px; border: 1px solid #e74c3c; border-radius: 4px; background-color: #fdf2f2;">',
       '⚠️ No images available<br>',
+      'Wikimedia: ', node_data$wikimedia_image_error, '<br>',
       'Unsplash: ', node_data$unsplash_image_error, '<br>',
       'Pixabay: ', node_data$pixabay_image_error, '<br>',
       'PhyloPic: ', node_data$silhouette_error,
       '</div>'
     )
-  } else if (has_unsplash_image_error && has_pixabay_image_error) {
-    # Unsplash and Pixabay failed, but PhyloPic may not have been attempted
+  } else if (has_wikimedia_image_error && has_unsplash_image_error && has_pixabay_image_error) {
+    # Three main photo sources failed, PhyloPic may not have been attempted
     image_content <- paste0(
       '<div class="image-error" style="color: #e74c3c; font-size: 12px; font-style: italic; padding: 8px; border: 1px solid #e74c3c; border-radius: 4px; background-color: #fdf2f2;">',
       '⚠️ Photo sources failed<br>',
+      'Wikimedia: ', node_data$wikimedia_image_error, '<br>',
       'Unsplash: ', node_data$unsplash_image_error, '<br>',
       'Pixabay: ', node_data$pixabay_image_error,
+      '</div>'
+    )
+  } else if (has_wikimedia_image_error) {
+    # Wikimedia image failed, others may not have been attempted
+    image_content <- paste0(
+      '<div class="image-error" style="color: #e74c3c; font-size: 12px; font-style: italic; padding: 8px; border: 1px solid #e74c3c; border-radius: 4px; background-color: #fdf2f2;">',
+      '⚠️ ', node_data$wikimedia_image_error,
       '</div>'
     )
   } else if (has_unsplash_image_error) {
@@ -413,7 +434,7 @@ format_combined_taxonomic_section <- function(node_data) {
   }
   
   # Combine content based on what we have
-  has_any_image <- has_override_image || has_unsplash_image || has_pixabay_image || has_silhouette || has_unsplash_image_error || has_pixabay_image_error || has_silhouette_error
+  has_any_image <- has_override_image || has_wikimedia_image || has_unsplash_image || has_pixabay_image || has_silhouette || has_wikimedia_image_error || has_unsplash_image_error || has_pixabay_image_error || has_silhouette_error
   has_any_text <- has_wikipedia || has_wikipedia_error
   
   if (has_any_image && has_any_text) {
@@ -1368,21 +1389,23 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
   
   # Process taxonomic nodes sequentially with natural rate limiting
   if (length(taxonomic_indices) > 0) {
-    api_log_info(paste("[", request_id, "] Processing", length(taxonomic_indices), "taxonomic nodes sequentially (PhyloPic → Wikipedia → PhyloPic → Wikipedia...)"))
-    
+    api_log_info(paste("[", request_id, "] Processing", length(taxonomic_indices), "taxonomic nodes sequentially (Override → Wikimedia → Unsplash → Pixabay → PhyloPic → Wikipedia...)"))
+
     wikipedia_successes <- 0
     override_successes <- 0
+    wikimedia_successes <- 0
     unsplash_image_successes <- 0
     pixabay_successes <- 0
     phylopic_successes <- 0
     unsplash_image_errors <- c()
     pixabay_errors <- c()
+    wikimedia_errors <- c()
     phylopic_errors <- c()
     processed_taxonomic_names <- c()
-    
+
     sequential_start <- Sys.time()
-    
-    # Sequential processing: Unsplash → Pixabay → PhyloPic → Wikipedia → Unsplash → Pixabay → PhyloPic → Wikipedia
+
+    # Sequential processing: Override → Wikimedia → Unsplash → Pixabay → PhyloPic → Wikipedia
     for (i in seq_along(taxonomic_node_info)) {
       item <- taxonomic_node_info[[i]]
       node_info <- item$node_info
@@ -1447,13 +1470,76 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
         api_log_warn(paste("[", request_id, "] Override image check error for:", taxonomic_name, "-", e$message))
       })
 
-      # 1. Unsplash Image API call (only if no override found)
+      # 1. Get species name from ChatGPT (only if no override found)
+      search_species_name <- taxonomic_name  # Default fallback
+      chatgpt_success <- FALSE
       if (!override_success) {
-        api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Fetching Unsplash image for:", taxonomic_name, "(no override found)"))
+        api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Getting species name for:", taxonomic_name, "(no override found)"))
+        chatgpt_start <- Sys.time()
+        tryCatch({
+          if (exists("cached_get_chatgpt_common_name")) {
+            chatgpt_result <- cached_get_chatgpt_common_name(taxonomic_name)
+            if (chatgpt_result$success && !is.null(chatgpt_result$common_name)) {
+              search_species_name <- chatgpt_result$common_name
+              chatgpt_success <- TRUE
+              api_log_info(paste("[", request_id, "] ChatGPT species name success for:", taxonomic_name, "->", search_species_name, "(", round(as.numeric(difftime(Sys.time(), chatgpt_start, units = "secs")), 3), "s)"))
+            } else {
+              api_log_warn(paste("[", request_id, "] ChatGPT species name failed for:", taxonomic_name, "-", chatgpt_result$error))
+            }
+          } else {
+            api_log_warn(paste("[", request_id, "] ChatGPT function not available for:", taxonomic_name))
+          }
+        }, error = function(e) {
+          api_log_error(paste("[", request_id, "] ChatGPT species name error for:", taxonomic_name, "-", e$message))
+        })
+      }
+
+      # 2. Wikipedia/Wikimedia Image API call (using species name from ChatGPT)
+      wikimedia_success <- FALSE
+      if (!override_success) {
+        api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Fetching Wikimedia image for:", search_species_name, "(override not found, using", if(chatgpt_success) "ChatGPT species name" else "taxonomic name", ")"))
+        wikimedia_start <- Sys.time()
+        tryCatch({
+          if (exists("cached_get_wikimedia_image_enhanced")) {
+            wikimedia_result <- cached_get_wikimedia_image_enhanced(search_species_name, target_width = 200)
+            if (wikimedia_result$success) {
+              wikimedia_image_html <- format_wikimedia_image_html(wikimedia_result)
+              if (!is.null(wikimedia_image_html) && nchar(wikimedia_image_html) > 0) {
+                node_info$wikimedia_image_html <- wikimedia_image_html
+                node_info$wikimedia_image_url <- wikimedia_result$image_url
+                node_info$wikimedia_image_attribution <- wikimedia_result$attribution
+                node_info$wikimedia_entity_id <- wikimedia_result$entity_id
+                node_info$wikimedia_entity_label <- wikimedia_result$entity_label
+                wikimedia_success <- TRUE
+                wikimedia_successes <- wikimedia_successes + 1
+                api_log_info(paste("[", request_id, "] Wikimedia image success for:", taxonomic_name, "(", round(as.numeric(difftime(Sys.time(), wikimedia_start, units = "secs")), 3), "s)"))
+              } else {
+                node_info$wikimedia_image_error <- "Empty Wikimedia image HTML generated"
+                wikimedia_errors <- c(wikimedia_errors, paste(taxonomic_name, ": Empty HTML"))
+                api_log_info(paste("[", request_id, "] Wikimedia image empty result for:", taxonomic_name))
+              }
+            } else {
+              node_info$wikimedia_image_error <- paste("Wikimedia image failed:", wikimedia_result$error)
+              wikimedia_errors <- c(wikimedia_errors, paste(taxonomic_name, ":", wikimedia_result$error))
+              api_log_info(paste("[", request_id, "] Wikimedia image failed for:", taxonomic_name, "-", wikimedia_result$error))
+            }
+          }
+        }, error = function(e) {
+          node_info$wikimedia_image_error <- paste("Wikimedia image error:", e$message)
+          wikimedia_errors <- c(wikimedia_errors, paste(taxonomic_name, ":", e$message))
+          api_log_error(paste("[", request_id, "] Wikimedia image error for:", taxonomic_name, "-", e$message))
+        })
+      } else {
+        api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Skipping Wikimedia - override image available for:", taxonomic_name))
+      }
+
+      # 3. Unsplash Image API call (only if both override and Wikimedia failed)
+      if (!override_success && !wikimedia_success) {
+        api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Fetching Unsplash image for:", search_species_name, "(override and Wikimedia unavailable)"))
         unsplash_image_start <- Sys.time()
         tryCatch({
         if (exists("cached_get_unsplash_random_image")) {
-          unsplash_image_result <- cached_get_unsplash_random_image(taxonomic_name, target_width = 200)
+          unsplash_image_result <- cached_get_unsplash_random_image(search_species_name, target_width = 200)
           if (unsplash_image_result$success) {
             unsplash_image_html <- format_unsplash_image_html(unsplash_image_result)
             if (!is.null(unsplash_image_html) && nchar(unsplash_image_html) > 0) {
@@ -1480,17 +1566,21 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
         api_log_error(paste("[", request_id, "] Unsplash image error for:", taxonomic_name, "-", e$message))
       })
       } else {
-        api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Skipping Unsplash - override image available for:", taxonomic_name))
+        if (override_success) {
+          api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Skipping Unsplash - override image available for:", taxonomic_name))
+        } else if (wikimedia_success) {
+          api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Skipping Unsplash - Wikimedia image available for:", taxonomic_name))
+        }
       }
 
-      # 2. Pixabay API call as secondary fallback (only if both override and Unsplash image failed)
+      # 4. Pixabay API call as tertiary fallback (only if override, Wikimedia and Unsplash all failed)
       pixabay_success <- FALSE
-      if (!override_success && !unsplash_image_success) {
-        api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Fetching Pixabay image for:", taxonomic_name, "(Unsplash image unavailable)"))
+      if (!override_success && !wikimedia_success && !unsplash_image_success) {
+        api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Fetching Pixabay image for:", search_species_name, "(override, Wikimedia and Unsplash unavailable)"))
         pixabay_start <- Sys.time()
         tryCatch({
           if (exists("cached_get_pixabay_random_image")) {
-            pixabay_result <- cached_get_pixabay_random_image(taxonomic_name, target_width = 200)
+            pixabay_result <- cached_get_pixabay_random_image(search_species_name, target_width = 200)
             if (pixabay_result$success) {
               pixabay_image_html <- format_pixabay_image_html(pixabay_result)
               if (!is.null(pixabay_image_html) && nchar(pixabay_image_html) > 0) {
@@ -1519,17 +1609,21 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
       } else {
         if (override_success) {
           api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Skipping Pixabay - override image available for:", taxonomic_name))
-        } else {
+        } else if (wikimedia_success) {
+          api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Skipping Pixabay - Wikimedia image available for:", taxonomic_name))
+        } else if (unsplash_image_success) {
           api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Skipping Pixabay - Unsplash image available for:", taxonomic_name))
         }
       }
 
-      # 3. PhyloPic API call as final fallback (only if override, Unsplash and Pixabay all failed)
-      if (!override_success && !unsplash_image_success && !pixabay_success) {
-        api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Fetching PhyloPic data for:", taxonomic_name, "(Override, Unsplash and Pixabay unavailable)"))
+      # 4. PhyloPic API call as final fallback (only if override, Wikimedia, Unsplash and Pixabay all failed)
+      if (!override_success && !wikimedia_success && !unsplash_image_success && !pixabay_success) {
+        api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Fetching PhyloPic data for:", taxonomic_name, "(override, Wikimedia, Unsplash and Pixabay unavailable)"))
       } else {
         if (override_success) {
           api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Skipping PhyloPic - override image available for:", taxonomic_name))
+        } else if (wikimedia_success) {
+          api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Skipping PhyloPic - Wikimedia image available for:", taxonomic_name))
         } else if (unsplash_image_success) {
           api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Skipping PhyloPic - Unsplash image available for:", taxonomic_name))
         } else if (pixabay_success) {
@@ -1538,7 +1632,7 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
       }
 
       phylopic_start <- Sys.time()
-      if (!override_success && !unsplash_image_success && !pixabay_success) {
+      if (!override_success && !wikimedia_success && !unsplash_image_success && !pixabay_success) {
         tryCatch({
           if (exists("cached_get_silhouette_data")) {
             silhouette_result <- cached_get_silhouette_data(taxonomic_name)
@@ -1603,6 +1697,7 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
                                   current_node = taxonomic_name,
                                   wikipedia_successes = wikipedia_successes,
                                   override_successes = override_successes,
+                                  wikimedia_successes = wikimedia_successes,
                                   unsplash_image_successes = unsplash_image_successes,
                                   pixabay_successes = pixabay_successes,
                                   phylopic_successes = phylopic_successes))
@@ -1614,10 +1709,14 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
     api_log_info(paste("[", request_id, "] Sequential processing results:", sep=""))
     api_log_info(paste("[", request_id, "]   Taxonomic names processed:", length(processed_taxonomic_names)))
     api_log_info(paste("[", request_id, "]   Override image successes:", override_successes, "/", length(processed_taxonomic_names)))
+    api_log_info(paste("[", request_id, "]   Wikimedia image successes:", wikimedia_successes, "/", length(processed_taxonomic_names)))
     api_log_info(paste("[", request_id, "]   Wikipedia text successes:", wikipedia_successes, "/", length(processed_taxonomic_names)))
     api_log_info(paste("[", request_id, "]   Unsplash image successes:", unsplash_image_successes, "/", length(processed_taxonomic_names)))
     api_log_info(paste("[", request_id, "]   Pixabay image successes:", pixabay_successes, "/", length(processed_taxonomic_names)))
     api_log_info(paste("[", request_id, "]   PhyloPic successes:", phylopic_successes, "/", length(processed_taxonomic_names)))
+    if (length(wikimedia_errors) > 0) {
+      api_log_info(paste("[", request_id, "]   Wikimedia image errors:", paste(head(wikimedia_errors, 3), collapse = "; "), if(length(wikimedia_errors) > 3) '...' else ''))
+    }
     if (length(unsplash_image_errors) > 0) {
       api_log_info(paste("[", request_id, "]   Unsplash image errors:", paste(head(unsplash_image_errors, 3), collapse = "; "), if(length(unsplash_image_errors) > 3) '...' else ''))
     }
@@ -1637,6 +1736,7 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
                            list(total_processed = length(processed_taxonomic_names),
                                 wikipedia_successes = wikipedia_successes,
                                 override_successes = override_successes,
+                                wikimedia_successes = wikimedia_successes,
                                 unsplash_image_successes = unsplash_image_successes,
                                 pixabay_successes = pixabay_successes,
                                 phylopic_successes = phylopic_successes,
