@@ -41,12 +41,20 @@ echo "============================================="
 echo ""
 
 # Extract unique taxonomic groups in order of first appearance
-# Extract all taxonomic groups first
-grep "\\[CHATGPT-COMMON_NAME\\]" logs/chatgpt.log | grep -o 'for [A-Za-z_][A-Za-z0-9_]*' | cut -d' ' -f2 | awk '!seen[$0]++' > "$temp_dir/taxonomic_groups.txt"
+# Look for the more recent pattern in API logs (both success and failure)
+{
+    grep "ChatGPT species name success for:" logs/api.log | sed -E 's/.*ChatGPT species name success for: ([^ ]*) .*/\1/'
+    grep "ChatGPT species name failed for:" logs/api.log | sed -E 's/.*ChatGPT species name failed for: ([^ ]*) .*/\1/'
+} | sort -u > "$temp_dir/taxonomic_groups.txt"
+
+# If no results from new format, try old format
+if [[ ! -s "$temp_dir/taxonomic_groups.txt" ]]; then
+    grep "\\[CHATGPT-COMMON_NAME\\]" logs/chatgpt.log 2>/dev/null | grep -o 'for [A-Za-z_][A-Za-z0-9_]*' | cut -d' ' -f2 | sort -u > "$temp_dir/taxonomic_groups.txt"
+fi
 
 group_count=0
 
-while IFS= read -r taxonomic_group; do
+while IFS= read -r taxonomic_group || [[ -n "$taxonomic_group" ]]; do
     if [[ -z "$taxonomic_group" ]]; then
         continue
     fi
@@ -69,15 +77,30 @@ while IFS= read -r taxonomic_group; do
     latest_response=""
     latest_timestamp=""
 
-    # Get the latest prompt
-    latest_prompt=$(grep "\\[CHATGPT-COMMON_NAME\\].*Prompt for $taxonomic_group" logs/chatgpt.log | tail -1 | sed -n 's/.*Prompt for [^ ]* : \(.*\)/\1/p')
+    # Check for ChatGPT success first
+    latest_response=$(grep "ChatGPT species name success for: $taxonomic_group" logs/api.log | tail -1 | sed -E 's/.*-> ([^(]*) \(.*/\1/' | sed 's/^ *//;s/ *$//')
+    chatgpt_failed=""
 
-    # Get the latest response
-    latest_response=$(grep "\\[CHATGPT-COMMON_NAME\\].*Raw response for $taxonomic_group" logs/chatgpt.log | tail -1 | sed -n 's/.*Raw response for [^ ]* : \(.*\)/\1/p')
-
-    # Extract timestamp from the most recent workflow for this taxonomic group
+    # Get timestamp from the processing log
     if [[ -n "$latest_response" ]]; then
-        latest_timestamp=$(grep "Using common name for search: $latest_response" logs/api.log | tail -1 | sed -n 's/INFO \[\([^]]*\)\].*/\1/p')
+        latest_timestamp=$(grep "ChatGPT species name success for: $taxonomic_group" logs/api.log | tail -1 | sed -n 's/INFO \[\([^]]*\)\].*/\1/p')
+    else
+        # Check for ChatGPT failure
+        chatgpt_failed=$(grep "ChatGPT species name failed for: $taxonomic_group" logs/api.log | tail -1)
+        if [[ -n "$chatgpt_failed" ]]; then
+            latest_timestamp=$(echo "$chatgpt_failed" | sed -n 's/INFO \[\([^]]*\)\].*/\1/p')
+            # If ChatGPT failed, the system falls back to using taxonomic name
+            latest_response="(ChatGPT failed - using taxonomic name)"
+        fi
+    fi
+
+    # Try old format if no results from new format
+    if [[ -z "$latest_response" && -z "$chatgpt_failed" ]]; then
+        latest_prompt=$(grep "\\[CHATGPT-COMMON_NAME\\].*Prompt for $taxonomic_group" logs/chatgpt.log 2>/dev/null | tail -1 | sed -n 's/.*Prompt for [^ ]* : \(.*\)/\1/p')
+        latest_response=$(grep "\\[CHATGPT-COMMON_NAME\\].*Raw response for $taxonomic_group" logs/chatgpt.log 2>/dev/null | tail -1 | sed -n 's/.*Raw response for [^ ]* : \(.*\)/\1/p')
+        if [[ -n "$latest_response" ]]; then
+            latest_timestamp=$(grep "Using common name for search: $latest_response" logs/api.log 2>/dev/null | tail -1 | sed -n 's/INFO \[\([^]]*\)\].*/\1/p')
+        fi
     fi
 
     # Display the most recent prompt and response
@@ -101,152 +124,221 @@ while IFS= read -r taxonomic_group; do
     # Analyze complete image pipeline: Override → Wikimedia → Unsplash → Pixabay → PhyloPic
     echo "  🖼️  IMAGE PIPELINE ANALYSIS:"
 
-    # Check for image override (highest priority)
-    override_found=$(grep -c "override image available for.*$taxonomic_group" logs/api.log 2>/dev/null || echo "0")
+    # Check for image override (highest priority) - this still uses taxonomic group name
+    override_found=$(grep -c "override image available.*$taxonomic_group\|No override image for.*$taxonomic_group" logs/api.log 2>/dev/null || echo "0")
     override_found=$(echo "$override_found" | head -1 | tr -d '\n')
-    if [[ "$override_found" -gt "0" ]]; then
+    override_success=$(grep -c "Override image found for.*$taxonomic_group" logs/api.log 2>/dev/null || echo "0")
+    override_success=$(echo "$override_success" | head -1 | tr -d '\n')
+
+    if [[ "$override_success" -gt "0" ]]; then
         echo "  🎯 Result: Override image used (highest priority)"
     else
-        # Check for Wikimedia search and results (second priority)
-        wikimedia_search=$(grep -c "Fetching Wikimedia image for.*$taxonomic_group" logs/api.log 2>/dev/null || echo "0")
-        wikimedia_search=$(echo "$wikimedia_search" | head -1 | tr -d '\n')
-        wikimedia_success=$(grep -c "Wikimedia image success for.*$taxonomic_group" logs/api.log 2>/dev/null || echo "0")
-        wikimedia_success=$(echo "$wikimedia_success" | head -1 | tr -d '\n')
-        wikimedia_failed=$(grep -c "Wikimedia image failed for.*$taxonomic_group" logs/api.log 2>/dev/null || echo "0")
-        wikimedia_failed=$(echo "$wikimedia_failed" | head -1 | tr -d '\n')
+        # Show override was checked but not found
+        if [[ "$override_found" -gt "0" ]]; then
+            echo "  🎯 Override: Not found"
+        fi
 
-        if [[ "$wikimedia_search" -gt "0" ]]; then
-            if [[ "$wikimedia_success" -gt "0" ]]; then
-                # Extract the ChatGPT species name for this taxonomic group
-                chatgpt_species_name=""
-                if [[ -n "$latest_response" ]]; then
-                    chatgpt_species_name="$latest_response"
-                fi
+        # For subsequent searches, we need to look for the ChatGPT species name
+        search_species_name="$latest_response"
 
-                # Extract Wikipedia article information using the species name (case-insensitive)
-                wikimedia_entity_info=""
-                if [[ -n "$chatgpt_species_name" ]]; then
-                    wikimedia_entity_info=$(grep -i "\\[WIKIMEDIA\\] Entity:.*$chatgpt_species_name" logs/api.log 2>/dev/null | tail -1 | sed -n 's/.*Entity: \(.*\)/\1/p')
-                fi
+        # Trace the complete image pipeline for this taxonomic group
+        # Look for the processing logs in chronological order
 
-                if [[ -n "$wikimedia_entity_info" ]]; then
-                    # Parse entity ID and label from format like "Q147128 - edible dormouse"
-                    entity_id=$(echo "$wikimedia_entity_info" | cut -d' ' -f1)
-                    entity_label=$(echo "$wikimedia_entity_info" | cut -d'-' -f2- | sed 's/^ *//')
-                    if [[ -n "$entity_label" ]]; then
-                        echo "  🌐 Result: Wikimedia image used from Wikipedia article: \"$entity_label\" ($entity_id)"
-                    else
-                        echo "  🌐 Result: Wikimedia image used (Wikipedia Commons) - Entity: $entity_id"
+        echo "  📋 Step-by-step analysis:"
+
+        # Step 1: ChatGPT species name generation
+        if [[ -n "$chatgpt_failed" ]]; then
+            # Extract failure reason from the log
+            failure_reason=$(echo "$chatgpt_failed" | sed -E 's/.*ChatGPT species name failed for: [^-]* - (.*)/\1/' | head -1)
+            if [[ -n "$failure_reason" && "$failure_reason" != "$chatgpt_failed" ]]; then
+                if [[ "$failure_reason" == *"glue"* ]]; then
+                    echo "    ❌ ChatGPT: FAILED - Logging error (ChatGPT response contained special characters)"
+                    echo "        💡 Note: Check logs for sanitized version of the response"
+                    # Try to find the sanitized response in logs
+                    sanitized_response=$(grep "\\[CHATGPT-COMMON_NAME\\] Raw response for $taxonomic_group (sanitized):" logs/chatgpt.log | tail -1 | sed 's/.*: //')
+                    if [[ -n "$sanitized_response" ]]; then
+                        echo "        📝 Sanitized response: \"$sanitized_response\""
                     fi
                 else
-                    echo "  🌐 Result: Wikimedia image used (Wikipedia Commons)"
+                    echo "    ❌ ChatGPT: FAILED - $failure_reason"
                 fi
             else
-                echo "  🌐 Wikimedia search attempted but failed"
+                echo "    ❌ ChatGPT: FAILED (falling back to taxonomic name)"
+            fi
+            search_species_name="$taxonomic_group"  # Use taxonomic name as fallback
+        elif [[ -n "$search_species_name" && "$search_species_name" != "(ChatGPT failed - using taxonomic name)" ]]; then
+            echo "    ✅ ChatGPT: $taxonomic_group → \"$search_species_name\""
+        else
+            echo "    ❌ ChatGPT: Failed to generate species name"
+            echo "  ⚠️  Cannot trace image pipeline without species name"
+            return
+        fi
 
-                # Continue to Unsplash analysis
-                if [[ -n "$latest_response" ]]; then
-                    # Search for Unsplash API calls with this common name
-                    search_context=$(grep -n "Using common name for search: $latest_response" logs/api.log | tail -1 | cut -d: -f1)
-                    if [[ -n "$search_context" ]]; then
-                        # Get results from a few lines after the search context
-                        unsplash_results=$(sed -n "${search_context},$(($search_context + 10))p" logs/api.log | grep "Found.*total results" | head -1 | sed -n 's/.*Found \([0-9]*\) total results.*/\1/p')
-                        unsplash_filtered=$(sed -n "${search_context},$(($search_context + 10))p" logs/api.log | grep "Found.*total results" | head -1 | sed -n 's/.*Found [0-9]* total results, \([0-9]*\) match topic filters.*/\1/p')
+        # Step 2: Check each image source in order using more precise log analysis
+        # Look for processing patterns that are more accurate to actual logs
+
+        # Wikimedia processing (searches using species name from ChatGPT, or scientific name from database lookup)
+        wikimedia_fetch_common=$(grep "Fetching Wikimedia image for: $search_species_name" logs/api.log)
+        wikimedia_fetch_scientific=$(grep "using scientific name from database lookup of $search_species_name" logs/api.log)
+        wikimedia_success=$(grep "Wikimedia image success for: $taxonomic_group" logs/api.log)
+        wikimedia_failed=$(grep "Wikimedia image failed for: $taxonomic_group" logs/api.log)
+        wikimedia_skipped_db=$(grep "Skipping Wikimedia - no scientific name found in database for: $search_species_name" logs/api.log)
+
+        if [[ -n "$wikimedia_skipped_db" ]]; then
+            echo "    ⏭️  Wikimedia: Skipped - no scientific name found in database for \"$search_species_name\""
+        elif [[ -n "$wikimedia_fetch_common" ]] || [[ -n "$wikimedia_fetch_scientific" ]] || [[ -n "$wikimedia_failed" ]]; then
+            if [[ -n "$wikimedia_success" ]]; then
+                if [[ -n "$wikimedia_fetch_scientific" ]]; then
+                    # Extract the scientific name used from the log
+                    scientific_name=$(echo "$wikimedia_fetch_scientific" | head -1 | sed -E 's/.*Fetching Wikimedia image for: ([^(]*) \(using scientific name from database lookup.*/\1/' | xargs)
+                    echo "    ✅ Wikimedia: SUCCESS using scientific name \"$scientific_name\" from database lookup of \"$search_species_name\""
+                else
+                    # Extract Wikipedia article info from entity search
+                    wikimedia_entity_info=$(grep "\\[WIKIMEDIA\\] Top result:" logs/api.log | grep -A2 -B2 "$search_species_name" | tail -1 | sed 's/.*Top result: //')
+                    if [[ -n "$wikimedia_entity_info" && "$wikimedia_entity_info" != "NA - NA - NA" ]]; then
+                        echo "    ✅ Wikimedia: SUCCESS → Wikipedia entity: $wikimedia_entity_info"
                     else
-                        unsplash_results=""
-                        unsplash_filtered=""
+                        echo "    ✅ Wikimedia: SUCCESS → Wikipedia Commons"
                     fi
+                fi
+            elif [[ -n "$wikimedia_failed" ]]; then
+                failure_reason=$(echo "$wikimedia_failed" | sed -E 's/.*Wikimedia image failed for: [^-]* - (.*)/\1/')
+                echo "    ❌ Wikimedia: FAILED for \"$search_species_name\" - $failure_reason"
+            else
+                echo "    ❓ Wikimedia: Search attempted (result unclear)"
+            fi
+        else
+            echo "    ⏭️  Wikimedia: Not attempted (possibly skipped)"
+        fi
 
-                    if [[ -n "$unsplash_results" && "$unsplash_results" != "" ]]; then
-                        echo "  📸 Unsplash Search: $unsplash_results results returned"
+        # Unsplash processing (searches using species name from ChatGPT)
+        unsplash_fetch=$(grep "Fetching Unsplash image for: $search_species_name" logs/api.log)
+        unsplash_success=$(grep "Unsplash image success for: $taxonomic_group" logs/api.log)
+        unsplash_failed=$(grep "Unsplash image failed for: $taxonomic_group" logs/api.log)
+        unsplash_skipped=$(grep "Skipping Unsplash.*$taxonomic_group" logs/api.log)
+        # Try to find topics for the original search term, or any related search near this taxonomic group processing
+        unsplash_topics=$(grep "Unsplash topics found for $search_species_name :" logs/api.log | tail -1 | sed -n 's/.*: \(.*\)/\1/p')
+        if [[ -z "$unsplash_topics" ]]; then
+            # If no direct match, look for topics in the same request context
+            request_context=$(grep -B 5 -A 5 "$taxonomic_group" logs/api.log | grep "Unsplash topics found for.*:" | tail -1 | sed -n 's/.*: \(.*\)/\1/p')
+            if [[ -n "$request_context" ]]; then
+                unsplash_topics="$request_context"
+            fi
+        fi
 
-                        # Extract topics found by Unsplash for this search
-                        if [[ -n "$search_context" ]]; then
-                            topics_line=$(sed -n "${search_context},$(($search_context + 10))p" logs/api.log | grep "Unsplash topics found for.*$latest_response" | head -1)
-                            if [[ -n "$topics_line" ]]; then
-                                topics=$(echo "$topics_line" | sed -n 's/.*: \(.*\)/\1/p')
-                                echo "  🏷️  All Topics Found: $topics"
-                            fi
-                        fi
-
-                        if [[ -n "$unsplash_filtered" && "$unsplash_filtered" != "" ]]; then
-                            echo "  🎯 Topic Filtering: $unsplash_filtered nature/wildlife matches"
-                            if [[ "$unsplash_results" -gt "0" ]]; then
-                                filter_ratio=$(echo "scale=1; $unsplash_filtered * 100 / $unsplash_results" | bc -l 2>/dev/null || echo "N/A")
-                                if [[ "$filter_ratio" != "N/A" ]]; then
-                                    echo "  📊 Filter Success Rate: ${filter_ratio}%"
-                                fi
-                            fi
-                        fi
-
-                        # Check for further fallbacks
-                        pixabay_success=$(grep -c "Pixabay image success for.*$taxonomic_group" logs/api.log 2>/dev/null || echo "0")
-                        pixabay_success=$(echo "$pixabay_success" | head -1 | tr -d '\n')
-                        phylopic_success=$(grep -c "PhyloPic.*success.*$taxonomic_group" logs/api.log 2>/dev/null || echo "0")
-                        phylopic_success=$(echo "$phylopic_success" | head -1 | tr -d '\n')
-
-                        if [[ "$pixabay_success" -gt "0" ]]; then
-                            echo "  🎨 Result: Pixabay image used (tertiary fallback)"
-                        elif [[ "$phylopic_success" -gt "0" ]]; then
-                            echo "  🦕 Result: PhyloPic used (final fallback)"
-                        else
-                            echo "  📸 Result: Unsplash image selected"
-                        fi
-                    else
-                        # No Unsplash data, check other sources
-                        pixabay_success=$(grep -c "Pixabay image success for.*$taxonomic_group" logs/api.log 2>/dev/null || echo "0")
-                        phylopic_success=$(grep -c "PhyloPic.*success.*$taxonomic_group" logs/api.log 2>/dev/null || echo "0")
-
-                        if [[ "$pixabay_success" -gt "0" ]]; then
-                            echo "  🎨 Result: Pixabay image used (Unsplash skipped)"
-                        elif [[ "$phylopic_success" -gt "0" ]]; then
-                            echo "  🦕 Result: PhyloPic used (final fallback)"
-                        else
-                            echo "  ⚠️  No image source data found"
-                        fi
-                    fi
+        if [[ -n "$unsplash_skipped" ]]; then
+            echo "    ⏭️  Unsplash: Skipped (higher priority source succeeded)"
+        elif [[ -n "$wikimedia_skipped_db" && -n "$unsplash_fetch" ]]; then
+            if [[ -n "$unsplash_success" ]]; then
+                echo "    ✅ Unsplash: SUCCESS for \"$search_species_name\" (fallback from failed database lookup)"
+                if [[ -n "$unsplash_topics" ]]; then
+                    echo "         📋 Topics found: $unsplash_topics"
+                fi
+            elif [[ -n "$unsplash_failed" ]]; then
+                echo "    ❌ Unsplash: FAILED for \"$search_species_name\" (fallback from failed database lookup)"
+                if [[ -n "$unsplash_topics" ]]; then
+                    echo "         📋 Topics found: $unsplash_topics"
+                fi
+            else
+                echo "    ❓ Unsplash: Search attempted (fallback from failed database lookup)"
+                if [[ -n "$unsplash_topics" ]]; then
+                    echo "         📋 Topics found: $unsplash_topics"
+                fi
+            fi
+        elif [[ -n "$unsplash_fetch" ]] || [[ -n "$unsplash_success" ]] || [[ -n "$unsplash_failed" ]]; then
+            if [[ -n "$unsplash_success" ]]; then
+                echo "    ✅ Unsplash: SUCCESS for \"$search_species_name\""
+                if [[ -n "$unsplash_topics" ]]; then
+                    echo "         📋 Topics found: $unsplash_topics"
+                fi
+            elif [[ -n "$unsplash_failed" ]]; then
+                echo "    ❌ Unsplash: FAILED for \"$search_species_name\""
+                if [[ -n "$unsplash_topics" ]]; then
+                    echo "         📋 Topics found: $unsplash_topics"
+                fi
+            else
+                echo "    ❓ Unsplash: Search attempted (result unclear)"
+                if [[ -n "$unsplash_topics" ]]; then
+                    echo "         📋 Topics found: $unsplash_topics"
                 fi
             fi
         else
-            # No Wikimedia search, go directly to other sources analysis
-            if [[ -n "$latest_response" ]]; then
-                # Search for Unsplash API calls with this common name
-                search_context=$(grep -n "Using common name for search: $latest_response" logs/api.log | tail -1 | cut -d: -f1)
-                if [[ -n "$search_context" ]]; then
-                    unsplash_results=$(sed -n "${search_context},$(($search_context + 10))p" logs/api.log | grep "Found.*total results" | head -1 | sed -n 's/.*Found \([0-9]*\) total results.*/\1/p')
-                    unsplash_filtered=$(sed -n "${search_context},$(($search_context + 10))p" logs/api.log | grep "Found.*total results" | head -1 | sed -n 's/.*Found [0-9]* total results, \([0-9]*\) match topic filters.*/\1/p')
-
-                    if [[ -n "$unsplash_results" && "$unsplash_results" != "" ]]; then
-                        echo "  📸 Unsplash Search: $unsplash_results results returned"
-
-                        if [[ -n "$unsplash_filtered" && "$unsplash_filtered" != "" ]]; then
-                            echo "  🎯 Topic Filtering: $unsplash_filtered nature/wildlife matches"
-                            if [[ "$unsplash_results" -gt "0" ]]; then
-                                filter_ratio=$(echo "scale=1; $unsplash_filtered * 100 / $unsplash_results" | bc -l 2>/dev/null || echo "N/A")
-                                if [[ "$filter_ratio" != "N/A" ]]; then
-                                    echo "  📊 Filter Success Rate: ${filter_ratio}%"
-                                fi
-                            fi
-                        fi
-                        echo "  📸 Result: Unsplash image selected"
-                    fi
-                fi
-            fi
+            echo "    ⏭️  Unsplash: Not attempted"
         fi
+
+        # Pixabay processing (searches using species name from ChatGPT)
+        pixabay_fetch=$(grep "Fetching Pixabay image for: $search_species_name" logs/api.log)
+        pixabay_success=$(grep "Pixabay image success for: $taxonomic_group" logs/api.log)
+        pixabay_failed=$(grep "Pixabay image failed for: $taxonomic_group" logs/api.log)
+        pixabay_skipped=$(grep "Skipping Pixabay.*$taxonomic_group" logs/api.log)
+
+        if [[ -n "$pixabay_skipped" ]]; then
+            echo "    ⏭️  Pixabay: Skipped (higher priority source succeeded)"
+        elif [[ -n "$pixabay_fetch" ]] || [[ -n "$pixabay_success" ]] || [[ -n "$pixabay_failed" ]]; then
+            if [[ -n "$pixabay_success" ]]; then
+                echo "    ✅ Pixabay: SUCCESS for \"$search_species_name\""
+            elif [[ -n "$pixabay_failed" ]]; then
+                echo "    ❌ Pixabay: FAILED for \"$search_species_name\""
+            else
+                echo "    ❓ Pixabay: Search attempted (result unclear)"
+            fi
+        else
+            echo "    ⏭️  Pixabay: Not attempted"
+        fi
+
+        # PhyloPic processing (uses original taxonomic name, not species name)
+        phylopic_fetch=$(grep "Fetching PhyloPic data for: $taxonomic_group" logs/api.log)
+        phylopic_success=$(grep "PhyloPic.*success.*for: $taxonomic_group" logs/api.log)
+        phylopic_failed=$(grep "PhyloPic.*failed.*for: $taxonomic_group" logs/api.log)
+        phylopic_skipped=$(grep "Skipping PhyloPic.*$taxonomic_group" logs/api.log)
+
+        if [[ -n "$phylopic_skipped" ]]; then
+            echo "    ⏭️  PhyloPic: Skipped (other image source succeeded)"
+        elif [[ -n "$phylopic_fetch" ]] || [[ -n "$phylopic_success" ]] || [[ -n "$phylopic_failed" ]]; then
+            if [[ -n "$phylopic_success" ]]; then
+                echo "    ✅ PhyloPic: SUCCESS for \"$taxonomic_group\""
+            elif [[ -n "$phylopic_failed" ]]; then
+                echo "    ❌ PhyloPic: FAILED for \"$taxonomic_group\""
+            else
+                echo "    ❓ PhyloPic: Search attempted (result unclear)"
+            fi
+        else
+            echo "    ⏭️  PhyloPic: Not attempted"
+        fi
+
+        # Determine final result
+        echo ""
+        echo "  🏆 FINAL RESULT:"
+        if [[ "$override_success" -gt "0" ]]; then
+            echo "    🎯 Override image used"
+        elif [[ -n "$wikimedia_success" ]]; then
+            echo "    🌐 Wikimedia image used"
+        elif [[ -n "$unsplash_success" ]]; then
+            echo "    📸 Unsplash image used"
+        elif [[ -n "$pixabay_success" ]]; then
+            echo "    🎨 Pixabay image used"
+        elif [[ -n "$phylopic_success" ]]; then
+            echo "    🦕 PhyloPic silhouette used"
+        else
+            echo "    ❌ No image source succeeded"
+        fi
+
     fi
 
     # Get tokens used for this group
-    tokens_used=$(grep "Final result for $taxonomic_group.*tokens:" logs/chatgpt.log | tail -1 | sed -n 's/.*tokens: \([0-9]*\).*/\1/p')
-    if [[ -n "$tokens_used" ]]; then
+    tokens_used=$(grep "Final result for $taxonomic_group.*tokens:" logs/chatgpt.log | tail -1 | sed -n 's/.*tokens: \([0-9]*\) ).*/\1/p')
+    if [[ -n "$tokens_used" && "$tokens_used" != "" ]]; then
         echo "  🔧 Tokens used: $tokens_used"
     fi
+
+    echo ""
     echo ""
 done < "$temp_dir/taxonomic_groups.txt"
 
-# Summary statistics
-echo ""
-echo "============================================="
-echo "📈 SUMMARY STATISTICS:"
+# Only show summary statistics if no specific taxonomic group filter is applied
+if [[ -z "$target_taxonomic_group" ]]; then
+    echo "============================================="
+    echo "📈 SUMMARY STATISTICS:"
 
 total_summary=$(grep -c "\\[CHATGPT-SUMMARY\\]" logs/chatgpt.log 2>/dev/null || echo "0")
 total_summary=$(echo "$total_summary" | head -1 | tr -d '\n')
@@ -269,7 +361,7 @@ total_pixabay=$(echo "$total_pixabay" | head -1 | tr -d '\n')
 total_phylopic=$(grep -c "PhyloPic.*success" logs/api.log 2>/dev/null || echo "0")
 total_phylopic=$(echo "$total_phylopic" | head -1 | tr -d '\n')
 
-echo "  Taxonomic groups processed: $group_count"
+echo "  Taxonomic groups processed: $(echo "$taxonomic_groups" | wc -w | tr -d ' ')"
 echo "  Summary operations: $total_summary"
 echo "  Common name operations: $total_common_name"
 echo "  Selection operations: $total_selection"
@@ -281,54 +373,30 @@ echo "  Unsplash images used: $total_unsplash"
 echo "  Pixabay images used: $total_pixabay"
 echo "  PhyloPic silhouettes used: $total_phylopic"
 
-# Image source breakdown
+echo ""
+echo "🖼️  IMAGE SOURCE BREAKDOWN:"
 total_images=$((total_overrides + total_wikimedia + total_unsplash + total_pixabay + total_phylopic))
 if [[ "$total_images" -gt "0" ]]; then
-    echo ""
-    echo "🖼️  IMAGE SOURCE BREAKDOWN:"
+    override_pct=$(echo "scale=1; $total_overrides * 100 / $total_images" | bc -l 2>/dev/null || echo "0")
+    wikimedia_pct=$(echo "scale=1; $total_wikimedia * 100 / $total_images" | bc -l 2>/dev/null || echo "0")
+    unsplash_pct=$(echo "scale=1; $total_unsplash * 100 / $total_images" | bc -l 2>/dev/null || echo "0")
+    pixabay_pct=$(echo "scale=1; $total_pixabay * 100 / $total_images" | bc -l 2>/dev/null || echo "0")
+    phylopic_pct=$(echo "scale=1; $total_phylopic * 100 / $total_images" | bc -l 2>/dev/null || echo "0")
 
-    if [[ "$total_overrides" -gt "0" ]]; then
-        override_percent=$(echo "scale=1; $total_overrides * 100 / $total_images" | bc -l 2>/dev/null || echo "N/A")
-        echo "  🎯 Override images: $total_overrides (${override_percent}%)"
-    fi
-    if [[ "$total_wikimedia" -gt "0" ]]; then
-        wikimedia_percent=$(echo "scale=1; $total_wikimedia * 100 / $total_images" | bc -l 2>/dev/null || echo "N/A")
-        echo "  🌐 Wikimedia images: $total_wikimedia (${wikimedia_percent}%)"
-    fi
-    if [[ "$total_unsplash" -gt "0" ]]; then
-        unsplash_percent=$(echo "scale=1; $total_unsplash * 100 / $total_images" | bc -l 2>/dev/null || echo "N/A")
-        echo "  📸 Unsplash photos: $total_unsplash (${unsplash_percent}%)"
-    fi
-    if [[ "$total_pixabay" -gt "0" ]]; then
-        pixabay_percent=$(echo "scale=1; $total_pixabay * 100 / $total_images" | bc -l 2>/dev/null || echo "N/A")
-        echo "  🎨 Pixabay photos: $total_pixabay (${pixabay_percent}%)"
-    fi
-    if [[ "$total_phylopic" -gt "0" ]]; then
-        phylopic_percent=$(echo "scale=1; $total_phylopic * 100 / $total_images" | bc -l 2>/dev/null || echo "N/A")
-        echo "  🦕 PhyloPic silhouettes: $total_phylopic (${phylopic_percent}%)"
-    fi
+    echo "  🎯 Override images: $total_overrides (${override_pct}%)"
+    echo "  🌐 Wikimedia images: $total_wikimedia (${wikimedia_pct}%)"
+    echo "  📸 Unsplash photos: $total_unsplash (${unsplash_pct}%)"
+    echo "  🎨 Pixabay photos: $total_pixabay (${pixabay_pct}%)"
+    echo "  🦕 PhyloPic silhouettes: $total_phylopic (${phylopic_pct}%)"
+else
+    echo "  No image data found"
+fi
 fi
 
-# Topic filtering effectiveness
-topic_success=$(grep "topic filtering.*found [1-9]" logs/api.log | wc -l | tr -d ' ')
-topic_success=$(echo "$topic_success" | head -1 | tr -d '\n')
-topic_failures=$(grep "topic filtering.*found 0" logs/api.log | wc -l | tr -d ' ')
-topic_failures=$(echo "$topic_failures" | head -1 | tr -d '\n')
-if [[ "$topic_success" -gt "0" ]] || [[ "$topic_failures" -gt "0" ]]; then
+# Only show topic analysis if no specific taxonomic group filter is applied
+if [[ -z "$target_taxonomic_group" ]]; then
     echo ""
-    echo "🎯 TOPIC FILTERING EFFECTIVENESS:"
-    total_filtering=$((topic_success + topic_failures))
-    if [[ "$total_filtering" -gt "0" ]]; then
-        success_rate=$(echo "scale=1; $topic_success * 100 / $total_filtering" | bc -l 2>/dev/null || echo "N/A")
-        echo "  ✅ Successful filters: $topic_success"
-        echo "  ❌ Failed filters: $topic_failures"
-        echo "  📊 Filter success rate: ${success_rate}%"
-    fi
-fi
-
-# Topic analysis across all searches
-echo ""
-echo "🏷️  COMPREHENSIVE TOPIC ANALYSIS:"
+    echo "🏷️  COMPREHENSIVE TOPIC ANALYSIS:"
 echo "=================================="
 
 # Extract all unique topics found across Unsplash searches (filtered by target group if specified)
@@ -376,6 +444,7 @@ if [[ -n "$all_search_topics" ]]; then
     done
 else
     echo "No topic data found in api.log"
+fi
 fi
 
 echo ""

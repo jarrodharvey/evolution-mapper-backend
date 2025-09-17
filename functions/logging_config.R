@@ -36,30 +36,62 @@ configure_evolution_logging <- function() {
   }
 }
 
-# Convenience function for API logging
+# Safe message sanitization for logging
+sanitize_log_message <- function(message) {
+  if (is.null(message) || is.na(message)) {
+    return("<NULL_OR_NA>")
+  }
+
+  # Convert to character if not already
+  message <- as.character(message)
+
+  # Replace problematic characters that can break glue formatter
+  message <- gsub("\r", "\\\\r", message, fixed = TRUE)  # Carriage returns
+  message <- gsub("\n", "\\\\n", message, fixed = TRUE)  # Line feeds
+  message <- gsub("\t", "\\\\t", message, fixed = TRUE)  # Tabs
+  message <- gsub("\\{", "\\\\{", message, fixed = TRUE) # Opening braces
+  message <- gsub("\\}", "\\\\}", message, fixed = TRUE) # Closing braces
+  message <- gsub("`", "'", message, fixed = TRUE)       # Backticks
+  message <- gsub("\"", "'", message, fixed = TRUE)      # Double quotes
+
+  # Truncate extremely long messages to prevent log bloat
+  if (nchar(message) > 500) {
+    message <- paste0(substr(message, 1, 497), "...")
+  }
+
+  return(message)
+}
+
+# Safe convenience functions for API logging with sanitization
 api_log_info <- function(message, ...) {
-  log_info(message, namespace = EVOLUTION_API_NAMESPACE, ...)
+  safe_message <- sanitize_log_message(message)
+  log_info(safe_message, namespace = EVOLUTION_API_NAMESPACE, ...)
 }
 
 api_log_warn <- function(message, ...) {
-  log_warn(message, namespace = EVOLUTION_API_NAMESPACE, ...)
+  safe_message <- sanitize_log_message(message)
+  log_warn(safe_message, namespace = EVOLUTION_API_NAMESPACE, ...)
 }
 
 api_log_error <- function(message, ...) {
-  log_error(message, namespace = EVOLUTION_API_NAMESPACE, ...)
+  safe_message <- sanitize_log_message(message)
+  log_error(safe_message, namespace = EVOLUTION_API_NAMESPACE, ...)
 }
 
-# Convenience functions for ChatGPT logging
+# Safe convenience functions for ChatGPT logging with sanitization
 chatgpt_log_info <- function(message, ...) {
-  log_info(message, namespace = CHATGPT_NAMESPACE, ...)
+  safe_message <- sanitize_log_message(message)
+  log_info(safe_message, namespace = CHATGPT_NAMESPACE, ...)
 }
 
 chatgpt_log_warn <- function(message, ...) {
-  log_warn(message, namespace = CHATGPT_NAMESPACE, ...)
+  safe_message <- sanitize_log_message(message)
+  log_warn(safe_message, namespace = CHATGPT_NAMESPACE, ...)
 }
 
 chatgpt_log_error <- function(message, ...) {
-  log_error(message, namespace = CHATGPT_NAMESPACE, ...)
+  safe_message <- sanitize_log_message(message)
+  log_error(safe_message, namespace = CHATGPT_NAMESPACE, ...)
 }
 
 # Initialize logging when this file is sourced

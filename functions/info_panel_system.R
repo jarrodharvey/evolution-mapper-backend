@@ -2,6 +2,70 @@
 # Replaces tooltips with clickable info icons and expandable panels
 # Mobile-friendly alternative to hover-based tooltips
 
+# Function to lookup scientific name from common name in species database
+lookup_scientific_name <- function(common_name) {
+  tryCatch({
+    # Connect to the species database
+    db_path <- "data/species.sqlite"
+    if (!file.exists(db_path)) {
+      return(NULL)
+    }
+
+    library(RSQLite)
+    library(DBI)
+    conn <- dbConnect(SQLite(), db_path)
+
+    # Try exact match first
+    query <- "SELECT scientific FROM species WHERE LOWER(common) = LOWER(?) LIMIT 1"
+    result <- dbGetQuery(conn, query, params = list(common_name))
+
+    if (nrow(result) > 0) {
+      dbDisconnect(conn)
+      return(result$scientific[1])
+    }
+
+    # Try singular/plural variations
+    # Remove trailing 's' for plural to singular conversion
+    singular_name <- gsub("s$", "", common_name, ignore.case = TRUE)
+    if (singular_name != common_name) {
+      query <- "SELECT scientific FROM species WHERE LOWER(common) = LOWER(?) LIMIT 1"
+      result <- dbGetQuery(conn, query, params = list(singular_name))
+
+      if (nrow(result) > 0) {
+        dbDisconnect(conn)
+        return(result$scientific[1])
+      }
+    }
+
+    # Try partial match with the root word (simplified - no hardcoded patterns)
+    query <- "SELECT scientific FROM species WHERE LOWER(common) LIKE LOWER(?) ORDER BY ott DESC LIMIT 1"
+    result <- dbGetQuery(conn, query, params = list(paste0("%", singular_name, "%")))
+
+    if (nrow(result) > 0) {
+      dbDisconnect(conn)
+      return(result$scientific[1])
+    }
+
+    # Try broader partial match with original name
+    query <- "SELECT scientific FROM species WHERE LOWER(common) LIKE LOWER(?) ORDER BY ott DESC LIMIT 1"
+    result <- dbGetQuery(conn, query, params = list(paste0("%", common_name, "%")))
+
+    if (nrow(result) > 0) {
+      dbDisconnect(conn)
+      return(result$scientific[1])
+    }
+
+    dbDisconnect(conn)
+    return(NULL)
+
+  }, error = function(e) {
+    if (exists("conn") && dbIsValid(conn)) {
+      dbDisconnect(conn)
+    }
+    return(NULL)
+  })
+}
+
 # Source Wikipedia API functions
 source("functions/wikipedia_api.R")
 
@@ -1482,7 +1546,11 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
             if (chatgpt_result$success && !is.null(chatgpt_result$common_name)) {
               search_species_name <- chatgpt_result$common_name
               chatgpt_success <- TRUE
-              api_log_info(paste("[", request_id, "] ChatGPT species name success for:", taxonomic_name, "->", search_species_name, "(", round(as.numeric(difftime(Sys.time(), chatgpt_start, units = "secs")), 3), "s)"))
+
+              # Sanitize the species name for safe logging using centralized function
+              safe_species_name <- sanitize_log_message(search_species_name)
+
+              api_log_info(paste("[", request_id, "] ChatGPT species name success for:", taxonomic_name, "->", safe_species_name, "(", round(as.numeric(difftime(Sys.time(), chatgpt_start, units = "secs")), 3), "s)"))
             } else {
               api_log_warn(paste("[", request_id, "] ChatGPT species name failed for:", taxonomic_name, "-", chatgpt_result$error))
             }
@@ -1497,11 +1565,32 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
       # 2. Wikipedia/Wikimedia Image API call (using species name from ChatGPT)
       wikimedia_success <- FALSE
       if (!override_success) {
-        api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Fetching Wikimedia image for:", search_species_name, "(override not found, using", if(chatgpt_success) "ChatGPT species name" else "taxonomic name", ")"))
-        wikimedia_start <- Sys.time()
-        tryCatch({
-          if (exists("cached_get_wikimedia_image_enhanced")) {
-            wikimedia_result <- cached_get_wikimedia_image_enhanced(search_species_name, target_width = 200)
+        # For Wikimedia searches, try to use scientific name from database lookup
+        # If no scientific name found, skip Wikimedia and go to Unsplash
+        wikimedia_search_term <- NULL
+        skip_wikimedia <- FALSE
+
+        if (chatgpt_success) {
+          # Look up scientific name from the species database
+          scientific_name <- lookup_scientific_name(search_species_name)
+          if (!is.null(scientific_name)) {
+            wikimedia_search_term <- scientific_name
+            api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Fetching Wikimedia image for:", sanitize_log_message(scientific_name), "(using scientific name from database lookup of", sanitize_log_message(search_species_name), ")"))
+          } else {
+            skip_wikimedia <- TRUE
+            api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Skipping Wikimedia - no scientific name found in database for:", sanitize_log_message(search_species_name), "(will try Unsplash with common name)"))
+          }
+        } else {
+          # For taxonomic names, use them directly for Wikimedia
+          wikimedia_search_term <- search_species_name
+          api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Fetching Wikimedia image for:", sanitize_log_message(search_species_name), "(using taxonomic name)"))
+        }
+
+        if (!skip_wikimedia) {
+          wikimedia_start <- Sys.time()
+          tryCatch({
+            if (exists("cached_get_wikimedia_image_enhanced")) {
+              wikimedia_result <- cached_get_wikimedia_image_enhanced(wikimedia_search_term, target_width = 200)
             if (wikimedia_result$success) {
               wikimedia_image_html <- format_wikimedia_image_html(wikimedia_result)
               if (!is.null(wikimedia_image_html) && nchar(wikimedia_image_html) > 0) {
@@ -1529,17 +1618,23 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
           wikimedia_errors <- c(wikimedia_errors, paste(taxonomic_name, ":", e$message))
           api_log_error(paste("[", request_id, "] Wikimedia image error for:", taxonomic_name, "-", e$message))
         })
+        } # End of if (!skip_wikimedia)
       } else {
         api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Skipping Wikimedia - override image available for:", taxonomic_name))
       }
 
-      # 3. Unsplash Image API call (only if both override and Wikimedia failed)
-      if (!override_success && !wikimedia_success) {
-        api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Fetching Unsplash image for:", search_species_name, "(override and Wikimedia unavailable)"))
+      # 3. Unsplash Image API call (only if both override and Wikimedia failed OR Wikimedia was skipped)
+      if (!override_success && (!wikimedia_success || skip_wikimedia)) {
+        if (skip_wikimedia) {
+          api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Fetching Unsplash image for:", sanitize_log_message(search_species_name), "(override not found, Wikimedia skipped due to database lookup failure)"))
+        } else {
+          api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Fetching Unsplash image for:", sanitize_log_message(search_species_name), "(override and Wikimedia unavailable)"))
+        }
         unsplash_image_start <- Sys.time()
         tryCatch({
         if (exists("cached_get_unsplash_random_image")) {
-          unsplash_image_result <- cached_get_unsplash_random_image(search_species_name, target_width = 200)
+          # Skip ChatGPT conversion since search_species_name is already a ChatGPT-generated common name
+          unsplash_image_result <- cached_get_unsplash_random_image(search_species_name, target_width = 200, skip_chatgpt_conversion = TRUE)
           if (unsplash_image_result$success) {
             unsplash_image_html <- format_unsplash_image_html(unsplash_image_result)
             if (!is.null(unsplash_image_html) && nchar(unsplash_image_html) > 0) {
@@ -1576,11 +1671,12 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
       # 4. Pixabay API call as tertiary fallback (only if override, Wikimedia and Unsplash all failed)
       pixabay_success <- FALSE
       if (!override_success && !wikimedia_success && !unsplash_image_success) {
-        api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Fetching Pixabay image for:", search_species_name, "(override, Wikimedia and Unsplash unavailable)"))
+        api_log_info(paste("[", request_id, "] [", i, "/", length(taxonomic_node_info), "] Fetching Pixabay image for:", sanitize_log_message(search_species_name), "(override, Wikimedia and Unsplash unavailable)"))
         pixabay_start <- Sys.time()
         tryCatch({
           if (exists("cached_get_pixabay_random_image")) {
-            pixabay_result <- cached_get_pixabay_random_image(search_species_name, target_width = 200)
+            # Skip ChatGPT conversion since search_species_name is already a ChatGPT-generated common name
+            pixabay_result <- cached_get_pixabay_random_image(search_species_name, target_width = 200, skip_chatgpt_conversion = TRUE)
             if (pixabay_result$success) {
               pixabay_image_html <- format_pixabay_image_html(pixabay_result)
               if (!is.null(pixabay_image_html) && nchar(pixabay_image_html) > 0) {

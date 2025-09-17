@@ -171,20 +171,20 @@ cached_get_wikipedia_main_image <- function(taxonomic_group, target_width = 800)
 # Unsplash Image functions with cache hit/miss logging
 #
 # Main Unsplash image function with cache logging
-cached_get_unsplash_random_image <- function(taxonomic_group, target_width = 800) {
+cached_get_unsplash_random_image <- function(taxonomic_group, target_width = 800, skip_chatgpt_conversion = FALSE) {
   cache_stats_before <- unsplash_images_cache$size()
 
   api_log_info(paste("Unsplash Image Cache lookup for", taxonomic_group))
 
   # Ensure required functions are available in this context
   tryCatch({
-    result <- memoised_get_unsplash_random_image(taxonomic_group, target_width)
+    result <- memoised_get_unsplash_random_image(taxonomic_group, target_width, skip_chatgpt_conversion)
   }, error = function(e) {
     # If memoised function fails due to missing dependencies, call original function directly
     api_log_warn(paste("Memoised Unsplash image function failed, calling original:", e$message))
     # Re-source the unsplash image functions to ensure they're available
     source("functions/unsplash_images.R", local = TRUE)
-    result <- get_unsplash_random_image(taxonomic_group, target_width)
+    result <- get_unsplash_random_image(taxonomic_group, target_width, skip_chatgpt_conversion)
     return(result)
   })
 
@@ -202,20 +202,20 @@ cached_get_unsplash_random_image <- function(taxonomic_group, target_width = 800
 # Pixabay Image functions with cache hit/miss logging
 #
 # Main Pixabay image function with cache logging
-cached_get_pixabay_random_image <- function(taxonomic_group, target_width = 200) {
+cached_get_pixabay_random_image <- function(taxonomic_group, target_width = 200, skip_chatgpt_conversion = FALSE) {
   cache_stats_before <- pixabay_images_cache$size()
 
   api_log_info(paste("Pixabay Image Cache lookup for", taxonomic_group))
 
   # Ensure required functions are available in this context
   tryCatch({
-    result <- memoised_get_pixabay_random_image(taxonomic_group, target_width)
+    result <- memoised_get_pixabay_random_image(taxonomic_group, target_width, skip_chatgpt_conversion)
   }, error = function(e) {
     # If memoised function fails due to missing dependencies, call original function directly
     api_log_warn(paste("Memoised Pixabay image function failed, calling original:", e$message))
     # Re-source the pixabay image functions to ensure they're available
     source("functions/pixabay_images.R", local = TRUE)
-    result <- get_pixabay_random_image(taxonomic_group, target_width)
+    result <- get_pixabay_random_image(taxonomic_group, target_width, skip_chatgpt_conversion)
     return(result)
   })
 

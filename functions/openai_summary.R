@@ -432,7 +432,7 @@ get_chatgpt_common_name_internal <- function(taxonomic_group_name, temperature =
     # Construct the prompt to get a common species name
     prompt <- paste0("Name a species belonging to the taxonomic group '",
                      taxonomic_group_name,
-                     "'. Reply with a common name only.")
+                     "'. Reply with a common name only. The name must be at least two words to ensure specificity.")
 
     # Log the prompt
     chatgpt_log_info(paste("[CHATGPT-COMMON_NAME] Prompt for", taxonomic_group_name, ":", prompt))
@@ -502,8 +502,15 @@ get_chatgpt_common_name_internal <- function(taxonomic_group_name, temperature =
     common_name <- response_data$choices[[1]]$message$content
     common_name <- trimws(common_name)
 
-    # Log the raw response
-    chatgpt_log_info(paste("[CHATGPT-COMMON_NAME] Raw response for", taxonomic_group_name, ":", common_name))
+    # Log the raw response with safe fallback
+    tryCatch({
+      chatgpt_log_info(paste("[CHATGPT-COMMON_NAME] Raw response for", taxonomic_group_name, ":", common_name))
+    }, error = function(log_err) {
+      # If logging fails, use a sanitized version and log the logging failure
+      safe_response <- gsub("[^[:print:]]", "?", common_name)  # Replace non-printable chars
+      chatgpt_log_warn(paste("[CHATGPT-COMMON_NAME] Raw response for", taxonomic_group_name, "(sanitized):", safe_response))
+      chatgpt_log_warn(paste("[CHATGPT-COMMON_NAME] Logging error occurred for", taxonomic_group_name, "- original response contained special characters"))
+    })
 
     # Clean up the response - remove quotes and extra punctuation
     common_name <- gsub('^["\']|["\']$', '', common_name)
@@ -558,12 +565,18 @@ get_chatgpt_common_name_internal <- function(taxonomic_group_name, temperature =
     ))
 
   }, error = function(e) {
-    # Log the error
-    chatgpt_log_error(paste("[CHATGPT-COMMON_NAME] Error for", taxonomic_group_name, ":", conditionMessage(e)))
+    # Log the error with safe fallback to prevent recursive logging issues
+    error_msg <- conditionMessage(e)
+    tryCatch({
+      chatgpt_log_error(paste("[CHATGPT-COMMON_NAME] Error for", taxonomic_group_name, ":", error_msg))
+    }, error = function(log_err) {
+      # If logging the error also fails, log a simplified version
+      chatgpt_log_error(paste("[CHATGPT-COMMON_NAME] Error for", taxonomic_group_name, "- (error message contained special characters)"))
+    })
 
     return(list(
       success = FALSE,
-      error = paste("Error getting ChatGPT common name:", conditionMessage(e)),
+      error = paste("Error getting ChatGPT common name:", error_msg),
       taxonomic_group = taxonomic_group_name
     ))
   })

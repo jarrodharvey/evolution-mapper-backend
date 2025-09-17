@@ -9,7 +9,7 @@ library(jsonlite)
 source("functions/logging_config.R")
 
 # Main function to fetch appropriate Pixabay image using creative common name search
-get_pixabay_random_image <- function(taxonomic_group, target_width = 200) {
+get_pixabay_random_image <- function(taxonomic_group, target_width = 200, skip_chatgpt_conversion = FALSE) {
   if (is.null(taxonomic_group) || is.na(taxonomic_group) || taxonomic_group == "") {
     return(list(success = FALSE, error = "No taxonomic group provided"))
   }
@@ -37,9 +37,9 @@ get_pixabay_random_image <- function(taxonomic_group, target_width = 200) {
       return(fallback_to_phylopic_final(taxonomic_group))
     }
 
-    # Step 2: Get common name for better search results (reuse ChatGPT pipeline)
+    # Step 2: Get common name for better search results (unless we're skipping conversion)
     search_query <- taxonomic_group  # Default fallback
-    if (exists("cached_get_chatgpt_common_name")) {
+    if (!skip_chatgpt_conversion && exists("cached_get_chatgpt_common_name")) {
       api_log_info(paste("Getting common name for Pixabay search:", taxonomic_group))
       common_name_result <- cached_get_chatgpt_common_name(taxonomic_group)
 
@@ -48,6 +48,11 @@ get_pixabay_random_image <- function(taxonomic_group, target_width = 200) {
         api_log_info(paste("Using common name for Pixabay search:", search_query))
       } else {
         api_log_info(paste("Common name conversion failed, using original:", taxonomic_group))
+      }
+    } else {
+      if (skip_chatgpt_conversion) {
+        api_log_info(paste("Using provided common name for Pixabay search:", taxonomic_group))
+        search_query <- taxonomic_group
       }
     }
 
