@@ -111,10 +111,12 @@ get_pixabay_random_image <- function(taxonomic_group, target_width = 200, skip_c
 
     api_log_info(paste("Found", length(photos), "Pixabay results for", search_query, "(", total_hits, "total available)"))
 
-    # Step 4: Select one of the results at random
-    selected_photo <- photos[[sample(length(photos), 1)]]
+    # Step 4: Limit to top 5 results for better relevance, then select randomly
+    # Take only the first 5 results (highest relevance ranking)
+    top_photos <- head(photos, 5)
+    selected_photo <- top_photos[[sample(length(top_photos), 1)]]
 
-    api_log_info(paste("Randomly selected Pixabay photo for", taxonomic_group, "(search query:", search_query, ")"))
+    api_log_info(paste("Randomly selected Pixabay photo from top", length(top_photos), "results for", taxonomic_group, "(search query:", search_query, ")"))
 
     # Extract image information from selected photo
     image_url <- selected_photo$previewURL  # Use previewURL (150px images)

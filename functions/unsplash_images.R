@@ -142,13 +142,15 @@ get_unsplash_random_image <- function(taxonomic_group, target_width = 800, skip_
       return(fallback_to_pixabay(taxonomic_group))
     }
 
-    # Step 5: Select one of the filtered results at random
-    selected_photo <- filtered_photos[[sample(length(filtered_photos), 1)]]
+    # Step 5: Limit to top 5 results for better relevance, then select randomly
+    # Take only the first 5 filtered results (highest relevance ranking)
+    top_filtered_photos <- head(filtered_photos, 5)
+    selected_photo <- top_filtered_photos[[sample(length(top_filtered_photos), 1)]]
 
     # Log which topics this photo matched
     photo_topics <- names(selected_photo$topic_submissions)
     matched_topics <- intersect(photo_topics, acceptable_topics)
-    api_log_info(paste("Randomly selected photo for", taxonomic_group, "(search query:", search_query, ") with topics:", paste(matched_topics, collapse = ", ")))
+    api_log_info(paste("Randomly selected photo from top", length(top_filtered_photos), "results for", taxonomic_group, "(search query:", search_query, ") with topics:", paste(matched_topics, collapse = ", ")))
 
     # Extract image information from selected photo
     image_url <- get_sized_image_url(selected_photo$urls, target_width)
