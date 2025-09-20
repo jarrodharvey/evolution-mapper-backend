@@ -4,6 +4,7 @@
 
 library(jsonlite)
 source("functions/info_panel_system.R")
+source("functions/phylopic_silhouettes.R")
 
 #' Add info panel data to tree data frame
 #' @param tree_data Data frame with Parent, Child columns for collapsibleTreeNetwork
