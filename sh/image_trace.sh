@@ -178,11 +178,23 @@ while IFS= read -r taxonomic_group || [[ -n "$taxonomic_group" ]]; do
         # Look for processing patterns that are more accurate to actual logs
 
         # Wikimedia processing (searches using species name from ChatGPT, or scientific name from database lookup)
-        wikimedia_fetch_common=$(grep "Fetching Wikimedia image for: $search_species_name" logs/api.log)
-        wikimedia_fetch_scientific=$(grep "using scientific name from database lookup of $search_species_name" logs/api.log)
-        wikimedia_success=$(grep "Wikimedia image success for: $taxonomic_group" logs/api.log)
-        wikimedia_failed=$(grep "Wikimedia image failed for: $taxonomic_group" logs/api.log)
-        wikimedia_skipped_db=$(grep "Skipping Wikimedia - no scientific name found in database for: $search_species_name" logs/api.log)
+        # Filter by timestamp to get results from the same request as the ChatGPT response
+        if [[ -n "$latest_timestamp" ]]; then
+            # Extract date for filtering (YYYY-MM-DD format)
+            filter_date=$(echo "$latest_timestamp" | cut -d' ' -f1)
+            wikimedia_fetch_common=$(grep "$filter_date" logs/api.log | grep "Fetching Wikimedia image for: $search_species_name")
+            wikimedia_fetch_scientific=$(grep "$filter_date" logs/api.log | grep "using scientific name from database lookup of $search_species_name")
+            wikimedia_success=$(grep "$filter_date" logs/api.log | grep "Wikimedia image success for: $taxonomic_group")
+            wikimedia_failed=$(grep "$filter_date" logs/api.log | grep "Wikimedia image failed for: $taxonomic_group")
+            wikimedia_skipped_db=$(grep "$filter_date" logs/api.log | grep "Skipping Wikimedia - no scientific name found in database for: $search_species_name")
+        else
+            # Fallback to unfiltered search if no timestamp available
+            wikimedia_fetch_common=$(grep "Fetching Wikimedia image for: $search_species_name" logs/api.log)
+            wikimedia_fetch_scientific=$(grep "using scientific name from database lookup of $search_species_name" logs/api.log)
+            wikimedia_success=$(grep "Wikimedia image success for: $taxonomic_group" logs/api.log)
+            wikimedia_failed=$(grep "Wikimedia image failed for: $taxonomic_group" logs/api.log)
+            wikimedia_skipped_db=$(grep "Skipping Wikimedia - no scientific name found in database for: $search_species_name" logs/api.log)
+        fi
 
         if [[ -n "$wikimedia_skipped_db" ]]; then
             echo "    ⏭️  Wikimedia: Skipped - no scientific name found in database for \"$search_species_name\""
@@ -212,12 +224,22 @@ while IFS= read -r taxonomic_group || [[ -n "$taxonomic_group" ]]; do
         fi
 
         # Unsplash processing (searches using species name from ChatGPT)
-        unsplash_fetch=$(grep "Fetching Unsplash image for: $search_species_name" logs/api.log)
-        unsplash_success=$(grep "Unsplash image success for: $taxonomic_group" logs/api.log)
-        unsplash_failed=$(grep "Unsplash image failed for: $taxonomic_group" logs/api.log)
-        unsplash_skipped=$(grep "Skipping Unsplash.*$taxonomic_group" logs/api.log)
-        # Try to find topics for the original search term, or any related search near this taxonomic group processing
-        unsplash_topics=$(grep "Unsplash topics found for $search_species_name :" logs/api.log | tail -1 | sed -n 's/.*: \(.*\)/\1/p')
+        # Filter by timestamp to get results from the same request
+        if [[ -n "$latest_timestamp" ]]; then
+            unsplash_fetch=$(grep "$filter_date" logs/api.log | grep "Fetching Unsplash image for: $search_species_name")
+            unsplash_success=$(grep "$filter_date" logs/api.log | grep "Unsplash image success for: $taxonomic_group")
+            unsplash_failed=$(grep "$filter_date" logs/api.log | grep "Unsplash image failed for: $taxonomic_group")
+            unsplash_skipped=$(grep "$filter_date" logs/api.log | grep "Skipping Unsplash.*$taxonomic_group")
+            unsplash_topics=$(grep "$filter_date" logs/api.log | grep "Unsplash topics found for $search_species_name :" | tail -1 | sed -n 's/.*: \(.*\)/\1/p')
+            unsplash_no_topics=$(grep "$filter_date" logs/api.log | grep "No topic_submissions found in Unsplash results for $search_species_name")
+        else
+            unsplash_fetch=$(grep "Fetching Unsplash image for: $search_species_name" logs/api.log)
+            unsplash_success=$(grep "Unsplash image success for: $taxonomic_group" logs/api.log)
+            unsplash_failed=$(grep "Unsplash image failed for: $taxonomic_group" logs/api.log)
+            unsplash_skipped=$(grep "Skipping Unsplash.*$taxonomic_group" logs/api.log)
+            unsplash_topics=$(grep "Unsplash topics found for $search_species_name :" logs/api.log | tail -1 | sed -n 's/.*: \(.*\)/\1/p')
+            unsplash_no_topics=$(grep "No topic_submissions found in Unsplash results for $search_species_name" logs/api.log)
+        fi
         if [[ -z "$unsplash_topics" ]]; then
             # If no direct match, look for topics in the same request context
             request_context=$(grep -B 5 -A 5 "$taxonomic_group" logs/api.log | grep "Unsplash topics found for.*:" | tail -1 | sed -n 's/.*: \(.*\)/\1/p')
@@ -235,9 +257,13 @@ while IFS= read -r taxonomic_group || [[ -n "$taxonomic_group" ]]; do
                     echo "         📋 Topics found: $unsplash_topics"
                 fi
             elif [[ -n "$unsplash_failed" ]]; then
-                echo "    ❌ Unsplash: FAILED for \"$search_species_name\" (fallback from failed database lookup)"
-                if [[ -n "$unsplash_topics" ]]; then
+                if [[ -n "$unsplash_no_topics" ]]; then
+                    echo "    ❌ Unsplash: FAILED for \"$search_species_name\" (fallback from failed database lookup) - No topic_submissions found"
+                elif [[ -n "$unsplash_topics" ]]; then
+                    echo "    ❌ Unsplash: FAILED for \"$search_species_name\" (fallback from failed database lookup) - No photos matched topic filters"
                     echo "         📋 Topics found: $unsplash_topics"
+                else
+                    echo "    ❌ Unsplash: FAILED for \"$search_species_name\" (fallback from failed database lookup)"
                 fi
             else
                 echo "    ❓ Unsplash: Search attempted (fallback from failed database lookup)"
@@ -252,9 +278,14 @@ while IFS= read -r taxonomic_group || [[ -n "$taxonomic_group" ]]; do
                     echo "         📋 Topics found: $unsplash_topics"
                 fi
             elif [[ -n "$unsplash_failed" ]]; then
-                echo "    ❌ Unsplash: FAILED for \"$search_species_name\""
-                if [[ -n "$unsplash_topics" ]]; then
+                if [[ -n "$unsplash_no_topics" ]]; then
+                    echo "    ❌ Unsplash: FAILED for \"$search_species_name\" - No topic_submissions found (photos have no biological topics)"
+                elif [[ -n "$unsplash_topics" ]]; then
+                    echo "    ❌ Unsplash: FAILED for \"$search_species_name\" - No photos matched topic filters"
                     echo "         📋 Topics found: $unsplash_topics"
+                    echo "         📋 Acceptable topics: animals, nature, wildlife, birds, marine-life, insects, plants, forest, ocean, freshwater, mountains, savanna, macro, zoology, botany, ecology, aquatic-life, wild-animals"
+                else
+                    echo "    ❌ Unsplash: FAILED for \"$search_species_name\" - Topic filtering failed"
                 fi
             else
                 echo "    ❓ Unsplash: Search attempted (result unclear)"
@@ -267,10 +298,17 @@ while IFS= read -r taxonomic_group || [[ -n "$taxonomic_group" ]]; do
         fi
 
         # Pixabay processing (searches using species name from ChatGPT)
-        pixabay_fetch=$(grep "Fetching Pixabay image for: $search_species_name" logs/api.log)
-        pixabay_success=$(grep "Pixabay image success for: $taxonomic_group" logs/api.log)
-        pixabay_failed=$(grep "Pixabay image failed for: $taxonomic_group" logs/api.log)
-        pixabay_skipped=$(grep "Skipping Pixabay.*$taxonomic_group" logs/api.log)
+        if [[ -n "$latest_timestamp" ]]; then
+            pixabay_fetch=$(grep "$filter_date" logs/api.log | grep "Fetching Pixabay image for: $search_species_name")
+            pixabay_success=$(grep "$filter_date" logs/api.log | grep "Pixabay image success for: $taxonomic_group")
+            pixabay_failed=$(grep "$filter_date" logs/api.log | grep "Pixabay image failed for: $taxonomic_group")
+            pixabay_skipped=$(grep "$filter_date" logs/api.log | grep "Skipping Pixabay.*$taxonomic_group")
+        else
+            pixabay_fetch=$(grep "Fetching Pixabay image for: $search_species_name" logs/api.log)
+            pixabay_success=$(grep "Pixabay image success for: $taxonomic_group" logs/api.log)
+            pixabay_failed=$(grep "Pixabay image failed for: $taxonomic_group" logs/api.log)
+            pixabay_skipped=$(grep "Skipping Pixabay.*$taxonomic_group" logs/api.log)
+        fi
 
         if [[ -n "$pixabay_skipped" ]]; then
             echo "    ⏭️  Pixabay: Skipped (higher priority source succeeded)"
@@ -287,10 +325,17 @@ while IFS= read -r taxonomic_group || [[ -n "$taxonomic_group" ]]; do
         fi
 
         # PhyloPic processing (uses original taxonomic name, not species name)
-        phylopic_fetch=$(grep "Fetching PhyloPic data for: $taxonomic_group" logs/api.log)
-        phylopic_success=$(grep "PhyloPic.*success.*for: $taxonomic_group" logs/api.log)
-        phylopic_failed=$(grep "PhyloPic.*failed.*for: $taxonomic_group" logs/api.log)
-        phylopic_skipped=$(grep "Skipping PhyloPic.*$taxonomic_group" logs/api.log)
+        if [[ -n "$latest_timestamp" ]]; then
+            phylopic_fetch=$(grep "$filter_date" logs/api.log | grep "Fetching PhyloPic data for: $taxonomic_group")
+            phylopic_success=$(grep "$filter_date" logs/api.log | grep "PhyloPic.*success.*for: $taxonomic_group")
+            phylopic_failed=$(grep "$filter_date" logs/api.log | grep "PhyloPic.*failed.*for: $taxonomic_group")
+            phylopic_skipped=$(grep "$filter_date" logs/api.log | grep "Skipping PhyloPic.*$taxonomic_group")
+        else
+            phylopic_fetch=$(grep "Fetching PhyloPic data for: $taxonomic_group" logs/api.log)
+            phylopic_success=$(grep "PhyloPic.*success.*for: $taxonomic_group" logs/api.log)
+            phylopic_failed=$(grep "PhyloPic.*failed.*for: $taxonomic_group" logs/api.log)
+            phylopic_skipped=$(grep "Skipping PhyloPic.*$taxonomic_group" logs/api.log)
+        fi
 
         if [[ -n "$phylopic_skipped" ]]; then
             echo "    ⏭️  PhyloPic: Skipped (other image source succeeded)"

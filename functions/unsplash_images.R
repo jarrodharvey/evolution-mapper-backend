@@ -134,6 +134,9 @@ get_unsplash_random_image <- function(taxonomic_group, target_width = 800, skip_
     api_log_info(paste("Found", length(photos), "total results,", length(filtered_photos), "match topic filters"))
 
     # If no photos pass the topic filter, fallback to Pixabay
+    # CRITICAL: Do NOT use unfiltered photos as fallback - this would return completely
+    # inappropriate images (e.g., sushi for "salmon", food for "turkey", etc.)
+    # Topic filtering is essential for biological accuracy in a scientific application
     if (length(filtered_photos) == 0) {
       api_log_warn(paste("No photos match topic filters for", search_query, "- falling back to Pixabay"))
       return(fallback_to_pixabay(taxonomic_group))
