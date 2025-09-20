@@ -1,5 +1,5 @@
 # Attribution data extraction from cache files
-# Extracts all phylopic and unsplash attributions from cached RDS files
+# Extracts all phylopic and wikipedia/wikimedia attributions from cached RDS files
 
 source("functions/logging_config.R")
 
@@ -10,10 +10,10 @@ get_all_attributions <- function() {
 
     result <- list(
       phylopic = list(),
-      unsplash = list(),
+      wikipedia = list(),
       summary = list(
         phylopic_count = 0,
-        unsplash_count = 0,
+        wikipedia_count = 0,
         total_taxonomic_groups = 0
       )
     )
@@ -71,52 +71,50 @@ get_all_attributions <- function() {
       }
     }
 
-    # Extract Unsplash attributions
-    unsplash_cache_dir <- "cache/unsplash_images"
-    if (dir.exists(unsplash_cache_dir)) {
-      unsplash_files <- list.files(unsplash_cache_dir, pattern = "\\.rds$", full.names = TRUE)
+    # Extract Wikimedia image attributions
+    wikimedia_cache_dir <- "cache/wikimedia_images"
+    if (dir.exists(wikimedia_cache_dir)) {
+      wikimedia_files <- list.files(wikimedia_cache_dir, pattern = "\\.rds$", full.names = TRUE)
 
-      for (file in unsplash_files) {
+      for (file in wikimedia_files) {
         tryCatch({
           data <- readRDS(file)
           if (is.list(data) && !is.null(data$value) && is.list(data$value)) {
             image_data <- data$value
-            if (image_data$success) {
+            if (image_data$success && !is.null(image_data$image_url)) {
               attribution_info <- list(
-                taxonomic_group = image_data$taxonomic_group,
-                search_query = image_data$search_query,
+                taxonomic_name = image_data$taxonomic_name,
+                entity_id = image_data$entity_id,
+                entity_label = image_data$entity_label,
+                entity_description = image_data$entity_description,
                 image_url = image_data$image_url,
-                photographer_name = image_data$photographer_name,
-                photographer_username = image_data$photographer_username,
-                photographer_url = image_data$photographer_url,
-                unsplash_url = image_data$unsplash_url,
                 attribution = image_data$attribution,
-                image_id = image_data$image_id,
-                alt_description = image_data$alt_description
+                total_images_available = image_data$total_images_available,
+                source = "Wikimedia Commons"
               )
 
               # Use filename as key
               filename_key <- basename(tools::file_path_sans_ext(file))
-              result$unsplash[[filename_key]] <- attribution_info
+              result$wikipedia[[filename_key]] <- attribution_info
             }
           }
         }, error = function(e) {
-          api_log_warn(paste("Error reading Unsplash cache file", file, ":", e$message))
+          api_log_warn(paste("Error reading Wikimedia cache file", file, ":", e$message))
         })
       }
     }
 
     # Update summary counts
     result$summary$phylopic_count <- length(result$phylopic)
-    result$summary$unsplash_count <- length(result$unsplash)
+    result$summary$wikipedia_count <- length(result$wikipedia)
     result$summary$total_taxonomic_groups <- length(unique(c(
-      sapply(result$unsplash, function(x) x$taxonomic_group),
+      sapply(result$wikipedia, function(x) x$taxonomic_name),
       names(result$phylopic)
     )))
 
     api_log_info(paste("Attribution extraction complete:",
                       result$summary$phylopic_count, "PhyloPic attributions,",
-                      result$summary$unsplash_count, "Unsplash attributions"))
+                      result$summary$wikipedia_count, "Wikipedia/Wikimedia attributions"))
 
     return(result)
 
@@ -125,8 +123,8 @@ get_all_attributions <- function() {
     return(list(
       error = paste("Attribution extraction failed:", e$message),
       phylopic = list(),
-      unsplash = list(),
-      summary = list(phylopic_count = 0, unsplash_count = 0, total_taxonomic_groups = 0)
+      wikipedia = list(),
+      summary = list(phylopic_count = 0, wikipedia_count = 0, total_taxonomic_groups = 0)
     ))
   })
 }

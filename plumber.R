@@ -1136,12 +1136,17 @@ function() {
       timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
       summary = attribution_data$summary,
       phylopic_attributions = attribution_data$phylopic,
-      unsplash_attributions = attribution_data$unsplash
+      wikipedia_attributions = attribution_data$wikipedia,
+      image_sources = list(
+        description = "Images come from Wikipedia/Wikimedia Commons and PhyloPic",
+        wikipedia_source = "Wikipedia articles and Wikimedia Commons",
+        phylopic_source = "PhyloPic silhouette database"
+      )
     )
 
     api_log_info(paste("Attribution data retrieved successfully:",
                       attribution_data$summary$phylopic_count, "PhyloPic +",
-                      attribution_data$summary$unsplash_count, "Unsplash"))
+                      attribution_data$summary$wikipedia_count, "Wikipedia/Wikimedia"))
 
     return(response)
 
