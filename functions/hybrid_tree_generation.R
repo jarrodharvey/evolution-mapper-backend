@@ -821,6 +821,74 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
   })
 }
 
+#' Create mapping between phylogenetic tree tips and species data
+#' @param phylo_tree ROTL phylo object
+#' @param species_data Species data frame with user-provided names
+#' @param request_id Request ID for logging
+#' @return Named vector mapping tip numbers to species_data row indices
+create_tip_to_species_mapping <- function(phylo_tree, species_data, request_id) {
+  n_tips <- length(phylo_tree$tip.label)
+  mapping <- integer(n_tips)
+
+  api_log_info(paste("[", request_id, "] Creating tip-to-species mapping for", n_tips, "tips"))
+
+  for (tip_num in 1:n_tips) {
+    tip_label <- phylo_tree$tip.label[tip_num]
+
+    # For regular species nodes (with OTT IDs), extract scientific name and match
+    if (grepl("_ott\\d+$", tip_label)) {
+      tip_clean <- gsub("_ott\\d+", "", tip_label)
+      tip_clean <- gsub("_", " ", tip_clean)
+
+      # Find matching species by scientific name
+      match_idx <- which(species_data$scientific == tip_clean)
+      if (length(match_idx) > 0) {
+        mapping[tip_num] <- match_idx[1]
+        api_log_info(paste("[", request_id, "] Tip", tip_num, "->", species_data$common[match_idx[1]], "(scientific name match)"))
+        next
+      }
+    }
+
+    # For mrcaott nodes or nodes that don't match by scientific name,
+    # try to match by OTT ID from the tip label
+    ott_matches <- regmatches(tip_label, gregexpr("ott\\d+", tip_label))[[1]]
+    matched <- FALSE
+
+    if (length(ott_matches) > 0) {
+      for (ott_match in ott_matches) {
+        ott_id <- as.numeric(gsub("ott", "", ott_match))
+        match_idx <- which(species_data$ott == ott_id)
+        if (length(match_idx) > 0) {
+          mapping[tip_num] <- match_idx[1]
+          api_log_info(paste("[", request_id, "] Tip", tip_num, "->", species_data$common[match_idx[1]], "(OTT ID", ott_id, "match)"))
+          matched <- TRUE
+          break
+        }
+      }
+    }
+
+    # If no OTT ID match, use process of elimination
+    if (!matched) {
+      # Find species that haven't been mapped yet
+      used_indices <- mapping[mapping > 0]
+      available_indices <- setdiff(1:nrow(species_data), used_indices)
+
+      if (length(available_indices) > 0) {
+        mapping[tip_num] <- available_indices[1]
+        api_log_info(paste("[", request_id, "] Tip", tip_num, "->", species_data$common[available_indices[1]], "(elimination)"))
+      } else {
+        # Last resort: use position-based mapping
+        if (tip_num <= nrow(species_data)) {
+          mapping[tip_num] <- tip_num
+          api_log_info(paste("[", request_id, "] Tip", tip_num, "->", species_data$common[tip_num], "(positional fallback)"))
+        }
+      }
+    }
+  }
+
+  return(mapping)
+}
+
 #' Convert ROTL phylo tree to network format with hybrid age information
 #' @param phylo_tree ROTL phylo object
 #' @param species_data Species data frame with user-provided names
@@ -829,16 +897,20 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
 #' @param request_id Optional request ID for logging correlation
 #' @return Data frame with parent-child network structure and age information
 convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_species, ancestor_ages, age_assignment_method = "chronos", request_id = NULL) {
-  
+
   if (is.null(request_id)) {
     request_id <- "network_conv"
   }
-  
+
   n_tips <- length(phylo_tree$tip.label)
   n_nodes <- phylo_tree$Nnode
-  
+
   api_log_info(paste("[", request_id, "] Processing hybrid tree with", n_tips, "tips and", n_nodes, "internal nodes"))
   api_log_info(paste("[", request_id, "] DateLife coverage:", length(datelife_species), "/", nrow(species_data), "species"))
+
+  # Create a mapping between phylogenetic tree tips and species_data entries
+  # This is crucial for correct labeling, especially for mrcaott nodes
+  tip_to_species_mapping <- create_tip_to_species_mapping(phylo_tree, species_data, request_id)
   
   # Map pairwise ages to ROTL tree node numbers to prevent inappropriate cascading
   rotl_node_ages <- list()
@@ -1245,43 +1317,20 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
   # Function to get node label with age information
   get_node_label_with_age <- function(node_num, node_type) {
     if (node_num <= n_tips) {
-      # Tip node - could be species or mrcaott (taxonomic)
-      tip_label <- phylo_tree$tip.label[node_num]
-      
-      # Check if this is a mrcaott node that should be mapped back to original species
-      if (grepl("^[Mm]rcaott\\d+ott\\d+", tip_label)) {
-        # This is a mrcaott that represents a species/taxon that ROTL collapsed
-        # We need to find which original species this corresponds to by position
-        # Since tip order in phylo_tree matches the order of valid_species
-        if (node_num <= length(species_data$common)) {
-          common_name <- species_data$common[node_num]
-          age_result <- get_age_info(node_num, node_type)
-          if (age_result$has_age) {
-            return(paste0(common_name, " (", age_result$info, ")"))
-          } else {
-            return(common_name)
-          }
-        } else {
-          # Fallback to readable name if we can't map it
-          readable_name <- convert_to_readable_name(tip_label)
-          age_result <- get_age_info(node_num, node_type)
-          if (age_result$has_age) {
-            return(paste0(readable_name, " (", age_result$info, ")"))
-          } else {
-            return(readable_name)
-          }
-        }
+      # Tip node - use the tip-to-species mapping to get the correct species
+      species_idx <- tip_to_species_mapping[node_num]
+
+      if (species_idx > 0 && species_idx <= nrow(species_data)) {
+        common_name <- species_data$common[species_idx]
+        # Species nodes don't show age labels - just the name
+        return(common_name)
       } else {
-        # Regular species node - use user-provided common name
+        # Fallback if mapping failed
+        tip_label <- phylo_tree$tip.label[node_num]
         tip_clean <- gsub("_ott\\d+", "", tip_label)
         tip_clean <- gsub("_", " ", tip_clean)
-        
-        match_idx <- which(species_data$scientific == tip_clean)
-        if (length(match_idx) > 0) {
-          common_name <- species_data$common[match_idx[1]]
-          return(common_name)  # Species never need age labels - just show the name
-        }
-        return(gsub("_", " ", tip_clean))
+        readable_name <- convert_to_readable_name(tip_clean)
+        return(readable_name)
       }
     } else {
       # Internal node
