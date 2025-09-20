@@ -120,13 +120,13 @@ get_legend_data <- function(type = "mixed") {
     shape = "circle"
   )
 
-  # Unnamed taxonomic group circle - always included
-  legend_items[["taxonomic_circle"]] <- list(
-    node_type = "taxonomic",
+  # Unnamed ancestor circle - always included
+  legend_items[["ancestor_circle"]] <- list(
+    node_type = "ancestor",
     label = "Ancestor not in a named taxonomic group",
     color = TREE_COLORS$taxonomic$hex,
     color_name = TREE_COLORS$taxonomic$name,
-    description = "Named taxonomic groups",
+    description = "Evolutionary ancestors without taxonomic group names",
     shape = "circle"
   )
 
