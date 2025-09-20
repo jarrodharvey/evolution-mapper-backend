@@ -72,8 +72,6 @@ source("functions/wikipedia_api.R")
 # Source Wikipedia image API functions
 source("functions/wikipedia_images.R")
 
-# Source Unsplash image API functions
-source("functions/unsplash_images.R")
 
 # Source PhyloPic silhouette functions
 source("functions/phylopic_silhouettes.R")
@@ -1979,34 +1977,34 @@ add_wikipedia_data <- function(node_info) {
     return(node_info)
   }
   
-  # Try to fetch Unsplash image first (highest priority)
+  # Try to fetch Wikimedia image first (highest priority)
   tryCatch({
-    # Check if cached unsplash image API function exists
-    if (exists("cached_get_unsplash_random_image")) {
-      unsplash_image_result <- cached_get_unsplash_random_image(taxonomic_name, target_width = 200)
+    # Check if cached wikimedia image API function exists
+    if (exists("cached_get_wikimedia_image_enhanced")) {
+      wikimedia_image_result <- cached_get_wikimedia_image_enhanced(taxonomic_name, target_width = 200)
 
-      if (unsplash_image_result$success) {
-        # Add Unsplash image data to node_info
-        unsplash_image_html <- format_unsplash_image_html(unsplash_image_result)
-        node_info$unsplash_image_html <- unsplash_image_html
-        node_info$unsplash_image_url <- unsplash_image_result$image_url
-        node_info$unsplash_image_attribution <- unsplash_image_result$attribution
-        node_info$unsplash_image_error <- NULL
+      if (wikimedia_image_result$success) {
+        # Add Wikimedia image data to node_info
+        wikimedia_image_html <- format_wikimedia_image_html(wikimedia_image_result)
+        node_info$wikimedia_image_html <- wikimedia_image_html
+        node_info$wikimedia_image_url <- wikimedia_image_result$image_url
+        node_info$wikimedia_image_attribution <- wikimedia_image_result$attribution
+        node_info$wikimedia_image_error <- NULL
       } else {
         # Add failure information to show in info panel
-        node_info$unsplash_image_html <- NULL
-        node_info$unsplash_image_url <- NULL
-        node_info$unsplash_image_attribution <- NULL
-        node_info$unsplash_image_error <- paste("Failed to fetch Unsplash image:", unsplash_image_result$error)
+        node_info$wikimedia_image_html <- NULL
+        node_info$wikimedia_image_url <- NULL
+        node_info$wikimedia_image_attribution <- NULL
+        node_info$wikimedia_image_error <- paste("Failed to fetch Wikimedia image:", wikimedia_image_result$error)
       }
     }
   }, error = function(e) {
     # If there's an error, add error information
-    api_log_warn(paste("Could not fetch Unsplash image for", taxonomic_name, ":", e$message))
-    node_info$unsplash_image_html <- NULL
-    node_info$unsplash_image_url <- NULL
-    node_info$unsplash_image_attribution <- NULL
-    node_info$unsplash_image_error <- paste("Failed to connect to Unsplash Image API:", e$message)
+    api_log_warn(paste("Could not fetch Wikimedia image for", taxonomic_name, ":", e$message))
+    node_info$wikimedia_image_html <- NULL
+    node_info$wikimedia_image_url <- NULL
+    node_info$wikimedia_image_attribution <- NULL
+    node_info$wikimedia_image_error <- paste("Failed to connect to Wikimedia Image API:", e$message)
   })
 
   # Try to fetch Wikipedia text data using the cached Wikipedia API function
@@ -2038,8 +2036,8 @@ add_wikipedia_data <- function(node_info) {
     node_info$wikipedia_error <- paste("Failed to connect to Wikipedia API:", e$message)
   })
   
-  # Try to fetch silhouette data using cached PhyloPic function (only if Unsplash image failed)
-  if (is.null(node_info$unsplash_image_html) || is.na(node_info$unsplash_image_html) || nchar(as.character(node_info$unsplash_image_html)) == 0) {
+  # Try to fetch silhouette data using cached PhyloPic function (only if Wikimedia image failed)
+  if (is.null(node_info$wikimedia_image_html) || is.na(node_info$wikimedia_image_html) || nchar(as.character(node_info$wikimedia_image_html)) == 0) {
     tryCatch({
       # Check if cached phylopic function exists
       if (exists("cached_get_silhouette_data")) {
