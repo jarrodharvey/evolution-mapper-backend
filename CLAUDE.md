@@ -19,8 +19,12 @@ install.packages(c("plumber", "rlang", "rotl", "ape", "collapsibleTree",
 **System Dependencies (production):**
 - `pandoc`, `libcurl4-openssl-dev`, `libssl-dev`, `libxml2-dev`, `libsqlite3-dev`
 
-### Kill Process on Port 8000
+### Server Management
 ```bash
+# Start/restart server (preferred method)
+sh/restart_server.sh
+
+# Kill process on port 8000 (manual method)
 lsof -ti:8000 | xargs kill -9
 ```
 
@@ -56,6 +60,10 @@ curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "common_names=Human,Dog&scientific_
 2. Edit `.Renviron` with your API keys:
 ```bash
 EVOLUTION_API_KEYS=your-key-1,your-key-2,your-key-3
+CORS_ALLOWED_ORIGINS=http://localhost:3000,https://your-domain.com
+DO_PAT=your-digitalocean-api-token
+DO_DROPLET_IP=your-droplet-ip-address
+DO_DROPLET_DOMAIN=your-domain.com
 ```
 
 **Important:** API keys in `.Renviron` are real. Example keys like `your-dev-key-123` in documentation are invalid.
@@ -186,5 +194,27 @@ result <- get_datelife_result(input = c("Homo sapiens", "Canis lupus"))
 
 ```bash
 # API integration tests
-./tests/test_clupeocephala_api.sh
+tests/test_chatgpt_logging.sh
+
+# Save test outputs to tests/ directory
+curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis catus" http://localhost:8000/api/full-tree-dated > tests/test_output.html
+
+# Use frontend for visual testing (restart backend first)
+sh/restart_server.sh
+# Then navigate to http://localhost:3000 with playwright
+```
+
+### Utility Scripts
+```bash
+# Clear API cache
+sh/clear_cache.sh
+
+# View server logs
+sh/logs.sh
+
+# Generate random test data
+sh/generate_random.sh
+
+# Fetch documentation
+sh/fetch_docs.sh
 ```

@@ -41,14 +41,22 @@ prov_log_success <- function(...) {
 
 # Configuration
 REQUIRED_FILES <- c(
-  "plumber.R", 
-  "functions/rotl_tree_generation.R", 
-  "functions/datelife_tree_generation.R", 
+  "plumber.R",
+  "functions/rotl_tree_generation.R",
+  "functions/datelife_tree_generation.R",
   "functions/hybrid_tree_generation.R",
   "functions/logging_config.R",
-  "functions/progress_tracking.R",
+  "functions/caching_config.R",
+  "functions/color_config.R",
   "functions/parallel_config.R",
+  "functions/progress_tracking.R",
   "functions/wikipedia_api.R",
+  "functions/info_panel_system.R",
+  "functions/phylopic_silhouettes.R",
+  "functions/attribution_extractor.R",
+  "functions/cached_api_functions.R",
+  "functions/wikimedia_images.R",
+  "functions/wikipedia_images.R",
   "data/species.sqlite"
 )
 FIREWALL_NAME <- "evolution-mapper-restricted"
@@ -600,26 +608,56 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
     
     # Install R packages system-wide for all users (required for service to work)
     prov_log_info("Installing R packages system-wide...")
-    
+
     # Create system library directory if it doesn't exist
     droplet_ssh(droplet, "sudo mkdir -p /usr/local/lib/R/site-library")
     droplet_ssh(droplet, "sudo chown -R root:staff /usr/local/lib/R/site-library")
     droplet_ssh(droplet, "sudo chmod 755 /usr/local/lib/R/site-library")
+
+    # Check if we can skip package installation by verifying key packages exist
+    prov_log_info("Checking existing R package installation...")
+    key_packages <- c("plumber", "datelife", "bold", "rphylopic")
+    all_packages_exist <- TRUE
+
+    tryCatch({
+      for (pkg in key_packages) {
+        check_result <- capture.output(droplet_ssh(droplet, paste0(
+          'R -e "if (require(', pkg, ', lib.loc=\'/usr/local/lib/R/site-library\', quietly=TRUE)) { cat(\'EXISTS\') } else { cat(\'MISSING\') }"'
+        )))
+        check_result <- paste(check_result, collapse = " ")
+        if (!grepl("EXISTS", check_result)) {
+          all_packages_exist <- FALSE
+          prov_log_info("Package missing or needs update:", pkg)
+          break
+        }
+      }
+
+      if (all_packages_exist) {
+        prov_log_success("All key packages already installed - skipping package installation")
+      } else {
+        prov_log_info("Some packages missing - proceeding with full installation")
+      }
+    }, error = function(e) {
+      prov_log_warn("Could not check existing packages - proceeding with installation:", e$message)
+      all_packages_exist <- FALSE
+    })
     
     # Set proper permissions for system library (critical for non-root user access)
     prov_log_info("Setting proper permissions for system library...")
     droplet_ssh(droplet, "sudo find /usr/local/lib/R/site-library -type d -exec chmod 755 {} \\;")
     droplet_ssh(droplet, "sudo find /usr/local/lib/R/site-library -type f -exec chmod 644 {} \\;")
     prov_log_success("System library permissions configured")
-    
-    # CRAN packages that work with current R
-    # CRAN packages (excluding memory-intensive ones that are installed as Ubuntu binaries)
-    cran_packages <- c(
-      "plumber", "rlang", "rotl", "ape", "collapsibleTree", "htmlwidgets", 
-      "dplyr", "colorspace", "jsonlite", "httr", "httr2",
-      "logger", "memoise", "cachem", "future", "promises", "remotes",
-      "Hmisc", "taxize", "rphylopic", "phylobase"
-    )
+
+    # Only install packages if not all key packages exist
+    if (!all_packages_exist) {
+      # CRAN packages that work with current R
+      # CRAN packages (excluding memory-intensive ones that are installed as Ubuntu binaries)
+      cran_packages <- c(
+        "plumber", "rlang", "rotl", "ape", "collapsibleTree", "htmlwidgets",
+        "dplyr", "colorspace", "jsonlite", "httr", "httr2",
+        "logger", "memoise", "cachem", "future", "promises", "remotes",
+        "Hmisc", "taxize", "rphylopic", "phylobase"
+      )
     
     for (pkg in cran_packages) {
       # Check if package is already installed system-wide
@@ -792,7 +830,11 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
     }, error = function(e) {
       stop("❌ Package verification failed: ", e$message)
     })
-    
+
+    } else {
+      prov_log_success("Skipping R package installation - all key packages already installed")
+    }
+
     # Deploy the API with selective file upload
     cat("Deploying Evolution Mapper API...\n")
     
@@ -892,22 +934,43 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
       stop("❌ Failed to upload database: ", e$message)
     })
     
-    # Create progress directory for progress tokens
-    prov_log_info("Creating progress directory...")
+    # Create required directories for API operation
+    prov_log_info("Creating required directories...")
+    required_dirs <- c("progress", "logs", "cache", "cache/info_panels", "cache/wikipedia", "cache/phylopic", "image_overrides")
+
     tryCatch({
-      droplet_ssh(droplet, "mkdir -p /var/plumber/evolution-mapper/progress")
-      droplet_ssh(droplet, "chmod 755 /var/plumber/evolution-mapper/progress")
-      
-      # Verify progress directory creation
-      progress_check <- capture.output(droplet_ssh(droplet, "ls -ld /var/plumber/evolution-mapper/progress"))
-      progress_check <- paste(progress_check, collapse = " ")
-      if (!grepl("progress", progress_check)) {
-        stop("Progress directory not created successfully")
+      for (dir_name in required_dirs) {
+        full_path <- paste0("/var/plumber/evolution-mapper/", dir_name)
+
+        prov_log_info("Creating directory:", dir_name)
+        droplet_ssh(droplet, paste0("mkdir -p ", full_path))
+
+        # Set appropriate permissions based on directory type
+        if (grepl("cache", dir_name)) {
+          # Cache directories need write access for the plumber user
+          droplet_ssh(droplet, paste0("chmod 755 ", full_path))
+          droplet_ssh(droplet, paste0("chown plumber:plumber ", full_path))
+        } else {
+          # Other directories can have standard permissions
+          droplet_ssh(droplet, paste0("chmod 755 ", full_path))
+        }
+
+        # Verify directory creation
+        dir_check <- capture.output(droplet_ssh(droplet, paste0("ls -ld ", full_path)))
+        dir_check <- paste(dir_check, collapse = " ")
+        if (!grepl(basename(dir_name), dir_check)) {
+          stop("Directory not created successfully: ", dir_name)
+        }
+
+        prov_log_success("Directory created successfully:", dir_name)
       }
-      
-      prov_log_success("Progress directory created successfully")
+
+      # Ensure plumber user owns all directories
+      droplet_ssh(droplet, "chown -R plumber:plumber /var/plumber/evolution-mapper")
+
+      prov_log_success("All required directories created successfully")
     }, error = function(e) {
-      stop("❌ Failed to create progress directory: ", e$message)
+      stop("❌ Failed to create required directories: ", e$message)
     })
     
     # Setup systemd service
@@ -921,6 +984,7 @@ After=network.target
 Type=simple
 User=plumber
 WorkingDirectory=/var/plumber/evolution-mapper
+ExecStartPre=/bin/bash -c "mkdir -p /var/plumber/evolution-mapper/{logs,cache,cache/info_panels,cache/wikipedia,cache/phylopic,progress,image_overrides} && chown -R plumber:plumber /var/plumber/evolution-mapper"
 ExecStart=/usr/bin/Rscript /var/plumber/evolution-mapper/run.R
 Restart=on-failure
 RestartSec=5
