@@ -116,11 +116,27 @@ get_wikimedia_image <- function(taxonomic_name, target_width = 200, max_images =
       api_log_info(paste("[WIKIMEDIA] Image URL:", image_url))
       api_log_info(paste("[WIKIMEDIA] Duration: search", round(as.numeric(difftime(image_start, search_start, units = "secs")), 3), "s, image", round(image_duration, 3), "s, total", round(total_duration, 3), "s"))
 
-      # Create attribution text
-      attribution <- paste0("Wikimedia Commons • ", entity_label)
+      # Get detailed image licensing/attribution information
+      filename <- extract_filename_from_url(image_url)
+      detailed_license_info <- get_image_license_info(filename)
+
+      # Create detailed attribution text using actual metadata
+      detailed_attribution <- format_image_attribution(detailed_license_info)
+
+      # Create basic attribution text (fallback)
+      basic_attribution <- paste0("Wikimedia Commons • ", entity_label)
       if (!is.null(entity_description) && !is.na(entity_description) && nchar(entity_description) > 0) {
-        attribution <- paste0(attribution, " (", entity_description, ")")
+        basic_attribution <- paste0(basic_attribution, " (", entity_description, ")")
       }
+
+      # Use detailed attribution if available, otherwise fallback to basic
+      attribution <- if (!is.null(detailed_license_info) && detailed_license_info$artist != "Unknown") {
+        detailed_attribution
+      } else {
+        basic_attribution
+      }
+
+      api_log_info(paste("[WIKIMEDIA] Attribution:", attribution))
 
       return(list(
         success = TRUE,
@@ -131,6 +147,8 @@ get_wikimedia_image <- function(taxonomic_name, target_width = 200, max_images =
         image_url = image_url,
         image_width = target_width,
         attribution = attribution,
+        detailed_license_info = detailed_license_info,
+        basic_attribution = basic_attribution,
         total_images_available = nrow(images_result),
         selected_index = selected_image_index,
         search_duration = round(as.numeric(difftime(image_start, search_start, units = "secs")), 3),

@@ -182,32 +182,50 @@ get_page_main_image <- function(page_title, target_width = 800) {
 
 # Extract filename from Wikipedia/Wikimedia image URL
 extract_filename_from_url <- function(image_url) {
-  # Wikipedia image URLs typically contain the filename
-  # Example: https://upload.wikimedia.org/wikipedia/commons/thumb/7/73/Lion_waiting_in_Namibia.jpg/800px-Lion_waiting_in_Namibia.jpg
-  
-  # Extract the original filename (before the thumbnail size prefix)
-  filename_match <- regexpr("/([^/]+\\.(?:jpg|jpeg|png|gif|svg|webp))(?:/\\d+px-[^/]+)?$", image_url, ignore.case = TRUE)
-  
-  if (filename_match[1] > 0) {
-    # Extract the matched filename part
-    matched_text <- substr(image_url, filename_match[1], filename_match[1] + attr(filename_match, "match.length") - 1)
-    # Remove the leading slash and thumbnail prefix if present
-    filename <- gsub("^/", "", matched_text)
-    filename <- gsub("/\\d+px-", "", filename)
-    return(paste0("File:", filename))
-  }
-  
-  # Fallback: try to extract any filename-like pattern
-  url_parts <- strsplit(image_url, "/")[[1]]
-  for (part in rev(url_parts)) {
-    if (grepl("\\.(jpg|jpeg|png|gif|svg|webp)$", part, ignore.case = TRUE)) {
-      # Remove thumbnail size prefix if present
-      clean_part <- gsub("^\\d+px-", "", part)
-      return(paste0("File:", clean_part))
+  tryCatch({
+    # Handle Special:Redirect URLs from WikidataR
+    # Example: https://commons.wikimedia.org/w/index.php?title=Special:Redirect/file/Panthera Diversity.jpg&width=200
+    if (grepl("Special:Redirect/file/", image_url)) {
+      # Extract filename from the Special:Redirect URL
+      filename_match <- regexpr("Special:Redirect/file/([^&]+)", image_url)
+      if (filename_match[1] > 0) {
+        # Extract the filename part after "Special:Redirect/file/"
+        matched_text <- substr(image_url, filename_match[1], filename_match[1] + attr(filename_match, "match.length") - 1)
+        filename <- gsub("Special:Redirect/file/", "", matched_text)
+        # URL decode the filename (spaces are encoded as %20)
+        filename <- URLdecode(filename)
+        return(paste0("File:", filename))
+      }
     }
-  }
-  
-  return("File:Unknown")
+
+    # Handle standard Wikimedia URLs
+    # Example: https://upload.wikimedia.org/wikipedia/commons/thumb/7/73/Lion_waiting_in_Namibia.jpg/800px-Lion_waiting_in_Namibia.jpg
+    filename_match <- regexpr("/([^/]+\\.(?:jpg|jpeg|png|gif|svg|webp))(?:/\\d+px-[^/]+)?$", image_url, ignore.case = TRUE)
+
+    if (filename_match[1] > 0) {
+      # Extract the matched filename part
+      matched_text <- substr(image_url, filename_match[1], filename_match[1] + attr(filename_match, "match.length") - 1)
+      # Remove the leading slash and thumbnail prefix if present
+      filename <- gsub("^/", "", matched_text)
+      filename <- gsub("/\\d+px-", "", filename)
+      return(paste0("File:", filename))
+    }
+
+    # Fallback: try to extract any filename-like pattern
+    url_parts <- strsplit(image_url, "/")[[1]]
+    for (part in rev(url_parts)) {
+      if (grepl("\\.(jpg|jpeg|png|gif|svg|webp)$", part, ignore.case = TRUE)) {
+        # Remove thumbnail size prefix if present
+        clean_part <- gsub("^\\d+px-", "", part)
+        return(paste0("File:", clean_part))
+      }
+    }
+
+    return("File:Unknown")
+  }, error = function(e) {
+    api_log_warn(paste("Error extracting filename from URL:", image_url, "-", e$message))
+    return("File:Unknown")
+  })
 }
 
 # Get licensing information for an image file

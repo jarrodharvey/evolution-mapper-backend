@@ -93,6 +93,12 @@ get_all_attributions <- function() {
                 source = "Wikimedia Commons"
               )
 
+              # Add detailed licensing information if available
+              if (!is.null(image_data$detailed_license_info)) {
+                attribution_info$detailed_license_info <- image_data$detailed_license_info
+                attribution_info$basic_attribution <- image_data$basic_attribution
+              }
+
               # Use filename as key
               filename_key <- basename(tools::file_path_sans_ext(file))
               result$wikipedia[[filename_key]] <- attribution_info
