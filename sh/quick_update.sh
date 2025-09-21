@@ -32,8 +32,8 @@ rsync -avz --progress \
     --exclude='.git' \
     ./ $REMOTE_USER@$DO_DROPLET_IP:$REMOTE_PATH/
 
-echo "🔐 Setting group permissions on remote files..."
-ssh $REMOTE_USER@$DO_DROPLET_IP "chgrp -R plumber $REMOTE_PATH && chmod -R g+rw $REMOTE_PATH"
+echo "🔐 Setting ownership and permissions on remote files..."
+ssh $REMOTE_USER@$DO_DROPLET_IP "chown -R plumber:plumber $REMOTE_PATH && chmod -R g+rw $REMOTE_PATH"
 
 echo "🔄 Restarting plumber service on remote server..."
 ssh $REMOTE_USER@$DO_DROPLET_IP "sudo systemctl restart plumber-evolution-mapper"
