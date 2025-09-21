@@ -132,7 +132,13 @@ configure_firewall <- function(droplet, allowed_ip = NULL) {
     cat("⚠️  No allowed IP specified - firewall configuration skipped\n")
     return()
   }
-  
+
+  # Verify doctl is available for firewall commands
+  doctl_check <- system("which doctl > /dev/null 2>&1")
+  if (doctl_check != 0) {
+    stop("❌ CRITICAL: doctl command not found - required for firewall configuration")
+  }
+
   cat("Configuring firewall for IP:", allowed_ip, "\n")
   
   # Check if firewall already exists
@@ -154,7 +160,10 @@ configure_firewall <- function(droplet, allowed_ip = NULL) {
       "protocol:icmp,address:0.0.0.0/0'"
     )
     
-    system(create_cmd)
+    create_result <- system(create_cmd)
+    if (create_result != 0) {
+      stop("❌ CRITICAL: Failed to create firewall - command failed with exit code ", create_result)
+    }
   }
   
   # Apply firewall to droplet
@@ -164,7 +173,10 @@ configure_firewall <- function(droplet, allowed_ip = NULL) {
     "--droplet-ids ", droplet$id
   )
   
-  system(apply_cmd)
+  apply_result <- system(apply_cmd)
+  if (apply_result != 0) {
+    stop("❌ CRITICAL: Failed to apply firewall to droplet - command failed with exit code ", apply_result)
+  }
   cat("✅ Firewall configured and applied\n")
 }
 
@@ -462,8 +474,7 @@ verify_deployment <- function(droplet) {
   health_code <- system(health_cmd, intern = TRUE)
   
   if (health_code[1] != "200") {
-    cat("❌ Health check failed - HTTP", health_code, "\n")
-    return(FALSE)
+    stop("❌ CRITICAL: Health check failed - HTTP ", health_code, " (expected 200)")
   }
   
   # Test API key endpoint
@@ -473,8 +484,7 @@ verify_deployment <- function(droplet) {
     api_code <- system(test_cmd, intern = TRUE)
     
     if (api_code[1] != "200") {
-      cat("❌ API key test failed - HTTP", api_code, "\n")
-      return(FALSE)
+      stop("❌ CRITICAL: API key test failed - HTTP ", api_code, " (expected 200)")
     }
   }
   
@@ -589,7 +599,12 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
     ubuntu_r_packages <- c("r-cran-rsqlite", "r-cran-dbi")
     for (pkg in ubuntu_r_packages) {
       prov_log_info("Installing Ubuntu binary package:", pkg)
-      droplet_ssh(droplet, paste0("sudo apt-get install -y ", pkg))
+      pkg_result <- capture.output(droplet_ssh(droplet, paste0("sudo apt-get install -y ", pkg, " && echo 'SUCCESS' || echo 'FAILED'")))
+      pkg_result <- paste(pkg_result, collapse = " ")
+      if (!grepl("SUCCESS", pkg_result)) {
+        stop("❌ CRITICAL: Failed to install Ubuntu binary package: ", pkg)
+      }
+      prov_log_success("Successfully installed Ubuntu binary package:", pkg)
     }
     
     tryCatch({
@@ -638,8 +653,8 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
         prov_log_info("Some packages missing - proceeding with full installation")
       }
     }, error = function(e) {
-      prov_log_warn("Could not check existing packages - proceeding with installation:", e$message)
-      all_packages_exist <- FALSE
+      prov_log_error("Failed to verify existing package installation:", e$message)
+      stop("❌ CRITICAL: Cannot verify package installation status - ", e$message)
     })
     
     # Set proper permissions for system library (critical for non-root user access)
@@ -752,8 +767,8 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
       }
       
     }, error = function(e) {
-      prov_log_warn("Could not automatically determine additional system dependencies:", e$message)
-      prov_log_info("Continuing with existing manual system dependency list...")
+      prov_log_error("Failed to determine system dependencies for R packages:", e$message)
+      stop("❌ CRITICAL: Cannot verify required system dependencies - ", e$message)
     })
     
     tryCatch({
@@ -851,7 +866,8 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
         prov_log_info("Plumber user already exists")
       }
     }, error = function(e) {
-      prov_log_warn("Could not create plumber user:", e$message)
+      prov_log_error("Failed to create plumber user:", e$message)
+      stop("❌ CRITICAL: Cannot create required plumber user - ", e$message)
     })
     
     # Create deployment directory structure
@@ -1023,7 +1039,19 @@ WantedBy=multi-user.target
     
     # Fix missing rlang dependency
     prov_log_info("Fixing rlang dependency in plumber.R...")
-    droplet_ssh(droplet, 'cd /var/plumber/evolution-mapper && echo "library(rlang)" > temp_fix.txt && echo "" >> temp_fix.txt && cat plumber.R >> temp_fix.txt && mv temp_fix.txt plumber.R')
+    rlang_fix_result <- capture.output(droplet_ssh(droplet, 'cd /var/plumber/evolution-mapper && echo "library(rlang)" > temp_fix.txt && echo "" >> temp_fix.txt && cat plumber.R >> temp_fix.txt && mv temp_fix.txt plumber.R && echo "SUCCESS" || echo "FAILED"'))
+    rlang_fix_result <- paste(rlang_fix_result, collapse = " ")
+    if (!grepl("SUCCESS", rlang_fix_result)) {
+      stop("❌ CRITICAL: Failed to fix rlang dependency in plumber.R")
+    }
+
+    # Verify the modification was successful
+    verification_result <- capture.output(droplet_ssh(droplet, "head -1 /var/plumber/evolution-mapper/plumber.R"))
+    verification_result <- paste(verification_result, collapse = " ")
+    if (!grepl("library\\(rlang\\)", verification_result)) {
+      stop("❌ CRITICAL: plumber.R modification verification failed - rlang library not found at beginning of file")
+    }
+    prov_log_success("plumber.R rlang dependency fixed and verified")
     
     # Create run.R script for systemd with system library path
     prov_log_info("Creating run.R script...")
@@ -1051,7 +1079,19 @@ WantedBy=multi-user.target
       "pr$run(port=8000, host='0.0.0.0')\n"
     )
     
-    droplet_ssh(droplet, paste0('cat > /var/plumber/evolution-mapper/run.R << "EOF"\n', run_r_content, 'EOF'))
+    run_r_result <- capture.output(droplet_ssh(droplet, paste0('cat > /var/plumber/evolution-mapper/run.R << "EOF"\n', run_r_content, 'EOF && echo "SUCCESS" || echo "FAILED"')))
+    run_r_result <- paste(run_r_result, collapse = " ")
+    if (!grepl("SUCCESS", run_r_result)) {
+      stop("❌ CRITICAL: Failed to create run.R script")
+    }
+
+    # Verify run.R was created successfully
+    run_r_check <- capture.output(droplet_ssh(droplet, "ls -la /var/plumber/evolution-mapper/run.R && grep -q 'plumber' /var/plumber/evolution-mapper/run.R && echo 'VERIFIED' || echo 'MISSING'"))
+    run_r_check <- paste(run_r_check, collapse = " ")
+    if (!grepl("VERIFIED", run_r_check)) {
+      stop("❌ CRITICAL: run.R script verification failed - file missing or invalid")
+    }
+    prov_log_success("run.R script created and verified")
     
     # Upload local .Renviron to server (ensures server matches local configuration)
     prov_log_info("Syncing local .Renviron to server...")
@@ -1085,6 +1125,14 @@ WantedBy=multi-user.target
     # Validate API keys format
     if (nchar(evolution_api_keys) < 10) {
       stop("❌ EVOLUTION_API_KEYS appear to be too short or invalid")
+    }
+
+    # Ensure API keys are not example/placeholder values
+    example_patterns <- c("your-dev-key", "your-key", "example", "test-key", "placeholder", "demo-key")
+    for (pattern in example_patterns) {
+      if (grepl(pattern, evolution_api_keys, ignore.case = TRUE)) {
+        stop("❌ CRITICAL: EVOLUTION_API_KEYS contains example/placeholder values (", pattern, ") - real API keys required")
+      }
     }
     
     cors_origins <- Sys.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
@@ -1179,9 +1227,7 @@ WantedBy=multi-user.target
     # Verify deployment with strict error handling
     prov_log_info("Performing deployment verification...")
     tryCatch({
-      if (!verify_deployment(droplet)) {
-        stop("Deployment verification failed - API is not responding correctly")
-      }
+      verify_deployment(droplet)  # Now calls stop() internally on failure
       prov_log_success("Deployment verification passed")
     }, error = function(e) {
       stop("❌ Deployment verification failed: ", e$message)
@@ -1241,9 +1287,9 @@ WantedBy=multi-user.target
     cat("\n✅ Provisioning completed successfully!\n")
     
   }, error = function(e) {
-    prov_log_error("Error during provisioning:", e$message)
+    prov_log_error("❌ CRITICAL: Provisioning failed:", e$message)
     prov_log_error("Check the logs above for details")
-    return(FALSE)
+    stop("❌ PROVISIONING FAILED: ", e$message)
   })
 }
 
