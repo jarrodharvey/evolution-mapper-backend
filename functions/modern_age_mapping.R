@@ -147,8 +147,16 @@ create_chronos_calibrations <- function(rotl_tree, pairwise_ages, species_data, 
         
         # Use median with some uncertainty range
         median_age <- age_info$median
-        min_age <- max(age_info$min, median_age * 0.8)  # At least 80% of median
-        max_age <- min(age_info$max, median_age * 1.2)  # At most 120% of median
+        # Add more flexibility to avoid overly tight constraints that cause chronos to fail
+        uncertainty_factor <- 0.1  # 10% uncertainty
+        min_age <- max(age_info$min, median_age * (1 - uncertainty_factor))
+        max_age <- min(age_info$max, median_age * (1 + uncertainty_factor))
+
+        # Ensure min_age < max_age (avoid exact equality which can cause chronos issues)
+        if (min_age >= max_age) {
+          min_age <- median_age * (1 - uncertainty_factor)
+          max_age <- median_age * (1 + uncertainty_factor)
+        }
         
         calibration_points <- rbind(calibration_points, data.frame(
           node = mrca_node,
@@ -284,6 +292,20 @@ generate_dated_tree_chronos <- function(rotl_tree, datelife_results, species_dat
       rotl_tree <- compute.brlen(rotl_tree, method = "Grafen", power = 1)
     }
     
+    # Debug: log calibration data before passing to chronos
+    api_log_info(paste("[", request_id, "] Calibration data frame structure:"))
+    api_log_info(paste("[", request_id, "] Columns:", paste(names(calibrations), collapse = ", ")))
+    api_log_info(paste("[", request_id, "] Node column class:", class(calibrations$node)))
+    api_log_info(paste("[", request_id, "] age.min column class:", class(calibrations$age.min)))
+    api_log_info(paste("[", request_id, "] age.max column class:", class(calibrations$age.max)))
+    api_log_info(paste("[", request_id, "] Calibration values:"))
+    for (i in 1:nrow(calibrations)) {
+      api_log_info(paste("[", request_id, "] Row", i, "- node:", calibrations$node[i],
+                         "age.min:", calibrations$age.min[i],
+                         "age.max:", calibrations$age.max[i],
+                         "soft.bounds:", calibrations$soft.bounds[i]))
+    }
+
     # Use chronos with relaxed clock model
     dated_tree <- chronos(
       phy = rotl_tree,
