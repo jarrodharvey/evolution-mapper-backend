@@ -297,6 +297,125 @@ function(search = NULL, limit = 50) {
   })
 }
 
+#* Get PhyloPic silhouette as base64 data URL with optional coloring
+#* @param uuid:[character] PhyloPic UUID (required)
+#* @param color:[character] Hex color code for the silhouette (optional, e.g., "#FF5733")
+#* @param size:[numeric] Target size in pixels (optional, default: 35)
+#* @get /api/get-phylopic
+function(uuid = NULL, color = NULL, size = 35) {
+  tryCatch({
+    # Validate required UUID parameter
+    if (is.null(uuid) || is.na(uuid) || nchar(trimws(uuid)) == 0) {
+      return(list(
+        success = FALSE,
+        error = "UUID parameter is required"
+      ))
+    }
+
+    # Clean and validate UUID format
+    uuid_clean <- trimws(uuid)
+    if (nchar(uuid_clean) != 36 || !grepl('^[a-f0-9\\-]{36}$', uuid_clean)) {
+      return(list(
+        success = FALSE,
+        error = "Invalid UUID format. Expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+      ))
+    }
+
+    # Validate and sanitize size parameter
+    size_numeric <- as.numeric(size)
+    if (is.na(size_numeric) || size_numeric < 10 || size_numeric > 200) {
+      size_numeric <- 35  # Default fallback
+    }
+
+    # Validate color parameter if provided
+    color_clean <- NULL
+    if (!is.null(color) && nchar(trimws(color)) > 0) {
+      color_clean <- trimws(color)
+      # Basic hex color validation
+      if (!grepl('^#[A-Fa-f0-9]{6}$', color_clean)) {
+        return(list(
+          success = FALSE,
+          error = "Invalid color format. Expected hex format: #RRGGBB"
+        ))
+      }
+    }
+
+    # Source PhyloPic functions
+    source("functions/phylopic_silhouettes.R")
+    source("functions/cached_api_functions.R")
+
+    # Get PhyloPic image using existing cached functions
+    silhouette_raster <- tryCatch({
+      if (exists("cached_get_phylopic", mode = "function")) {
+        cached_get_phylopic(uuid = uuid_clean, format = "raster")
+      } else {
+        get_phylopic(uuid = uuid_clean, format = "raster")
+      }
+    }, error = function(e) {
+      return(list(success = FALSE, error = paste("Failed to fetch PhyloPic:", e$message)))
+    })
+
+    # Check if raster fetch was successful
+    if (is.list(silhouette_raster) && !silhouette_raster$success) {
+      return(silhouette_raster)  # Return the error
+    }
+
+    # Apply color if provided
+    if (!is.null(color_clean)) {
+      colored_silhouette <- tryCatch({
+        recolor_phylopic(silhouette_raster, fill = color_clean, remove_background = TRUE)
+      }, error = function(e) {
+        # If coloring fails, use original silhouette
+        silhouette_raster
+      })
+    } else {
+      colored_silhouette <- silhouette_raster
+      color_clean <- "#000000"  # Default black
+    }
+
+    # Convert to base64 data URL
+    data_url <- raster_to_data_url(colored_silhouette, target_width = size_numeric, target_height = size_numeric)
+
+    if (is.null(data_url)) {
+      return(list(
+        success = FALSE,
+        error = "Failed to convert silhouette to data URL"
+      ))
+    }
+
+    # Get attribution information
+    attribution_data <- tryCatch({
+      get_attribution(uuid = uuid_clean)
+    }, error = function(e) {
+      NULL
+    })
+
+    attribution_text <- if (is.data.frame(attribution_data) && nrow(attribution_data) > 0) {
+      contributor <- if (!is.na(attribution_data$contributor[1])) attribution_data$contributor[1] else "Unknown"
+      paste("Silhouette by", contributor, "via PhyloPic")
+    } else {
+      "Silhouette via PhyloPic"
+    }
+
+    # Return successful response
+    return(list(
+      success = TRUE,
+      data_url = data_url,
+      uuid = uuid_clean,
+      applied_color = color_clean,
+      size = size_numeric,
+      attribution = attribution_text,
+      phylopic_url = paste0("https://www.phylopic.org/images/", uuid_clean)
+    ))
+
+  }, error = function(e) {
+    return(list(
+      success = FALSE,
+      error = paste("Internal server error:", conditionMessage(e))
+    ))
+  })
+}
+
 #* Generate phylogenetic tree from list of species with both common and scientific names
 #* @param common_names A JSON array of species common names
 #* @param scientific_names A JSON array of species scientific names (must match common_names length)
@@ -662,8 +781,9 @@ function(req, common_names = NULL, scientific_names = NULL, allow_partial_respon
 #* @param scientific_names A JSON array of species scientific names (must match common_names length)
 #* @param progress_token Optional progress token for tracking tree generation steps
 #* @param expansion_speed Optional expansion speed in milliseconds (default 750)
+#* @param as_json Optional boolean to return JSON structure instead of HTML (default false)
 #* @post /api/full-tree-dated
-function(req, common_names = NULL, scientific_names = NULL, progress_token = NULL, throttle_secs = NULL, expansion_speed = NULL) {
+function(req, common_names = NULL, scientific_names = NULL, progress_token = NULL, throttle_secs = NULL, expansion_speed = NULL, as_json = NULL) {
   # Use future_promise for asynchronous processing to allow concurrent requests
   promises::future_promise({
   request_id <- paste0("req_", format(Sys.time(), "%Y%m%d_%H%M%S_"), sample(1000:9999, 1))
@@ -748,6 +868,17 @@ function(req, common_names = NULL, scientific_names = NULL, progress_token = NUL
     }
   }
   api_log_info(paste("Expansion speed:", expansion_ms, "milliseconds"))
+
+  # Parse and validate as_json parameter
+  output_as_json <- FALSE  # Default value
+  if (!is.null(as_json) && as_json != "") {
+    if (is.logical(as_json)) {
+      output_as_json <- as_json
+    } else if (is.character(as_json)) {
+      output_as_json <- tolower(as_json) %in% c("true", "1", "yes")
+    }
+  }
+  api_log_info(paste("Output format:", if(output_as_json) "JSON" else "HTML"))
   
   api_log_info(paste("Calling generate_hybrid_tree_html with", length(common_list), "species..."))
   
@@ -755,7 +886,7 @@ function(req, common_names = NULL, scientific_names = NULL, progress_token = NUL
                  list(common_names = common_list, scientific_names = scientific_list))
   
   tree_gen_start <- Sys.time()
-  result <- generate_hybrid_tree_html(common_list, scientific_list, request_id = request_id, progress_token = progress_token, throttle_secs = throttle_seconds, expansion_speed = expansion_ms)
+  result <- generate_hybrid_tree_html(common_list, scientific_list, request_id = request_id, progress_token = progress_token, throttle_secs = throttle_seconds, expansion_speed = expansion_ms, as_json = output_as_json)
   tree_gen_duration <- as.numeric(difftime(Sys.time(), tree_gen_start, units = "secs"))
   
   total_duration <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))

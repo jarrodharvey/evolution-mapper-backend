@@ -723,7 +723,7 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
       update_progress_internal("creating_output", "in_progress",
                              list(step = "Creating hybrid tree JSON structure"))
 
-      tree_output <- create_hybrid_tree_json(network_data, request_id, progress_token)
+      tree_output <- create_hybrid_tree_json(network_data, request_id, progress_token, as_json)
       output_type <- "JSON"
     } else {
       api_log_info(paste("[", request_id, "] STEP 5: Creating hybrid tree visualization...", sep=""))
@@ -1608,7 +1608,7 @@ transform_hybrid_to_info_panel_format <- function(network_data) {
 #' @param tree_data Enhanced data frame with info panel data
 #' @param request_id Optional request ID for logging correlation
 #' @return Nested list structure representing the tree
-convert_network_to_nested_json <- function(network_data, tree_data, request_id = NULL, phylopic_data = NULL) {
+convert_network_to_nested_json <- function(network_data, tree_data, request_id = NULL, phylopic_data = NULL, as_json = FALSE) {
   if (is.null(request_id)) {
     request_id <- "json_convert"
   }
@@ -1675,7 +1675,8 @@ convert_network_to_nested_json <- function(network_data, tree_data, request_id =
           metadata$phylopic_uuid <- phylopic_info$uuid
           metadata$phylopic_url <- phylopic_info$phylopic_url
           metadata$phylopic_attribution <- phylopic_info$attribution
-          metadata$node_shape <- phylopic_info$phylopic_url
+          # For JSON output, use UUID; for HTML output, use full URL
+          metadata$node_shape <- if (as_json) phylopic_info$uuid else phylopic_info$phylopic_url
           phylopic_found <- TRUE
         }
       }
@@ -1704,7 +1705,8 @@ convert_network_to_nested_json <- function(network_data, tree_data, request_id =
             if (nchar(uuid_clean) == 36 && grepl('[a-f0-9\\-]{36}', uuid_clean)) {
               metadata$phylopic_uuid <- uuid_clean
               metadata$phylopic_url <- paste0("https://images.phylopic.org/images/", uuid_clean, "/vector.svg")
-              metadata$node_shape <- metadata$phylopic_url
+              # For JSON output, use UUID; for HTML output, use full URL
+              metadata$node_shape <- if (as_json) uuid_clean else metadata$phylopic_url
               # Don't overwrite image_url - it should come from the actual info panel image
               break
             }
@@ -1984,7 +1986,7 @@ convert_network_to_nested_json <- function(network_data, tree_data, request_id =
 #' @param request_id Optional request ID for logging correlation
 #' @param progress_token Optional progress token for tracking external API calls
 #' @return Nested JSON structure representing the tree
-create_hybrid_tree_json <- function(network_data, request_id = NULL, progress_token = NULL) {
+create_hybrid_tree_json <- function(network_data, request_id = NULL, progress_token = NULL, as_json = FALSE) {
   if (is.null(request_id)) {
     request_id <- "json_create"
   }
@@ -2065,7 +2067,7 @@ create_hybrid_tree_json <- function(network_data, request_id = NULL, progress_to
   # Step 5.4: Convert to nested JSON structure
   update_progress_internal("converting_to_json", "in_progress",
                          list(step = "Converting tree structure to nested JSON"))
-  tree_json <- convert_network_to_nested_json(network_data, tree_data, request_id, phylopic_data)
+  tree_json <- convert_network_to_nested_json(network_data, tree_data, request_id, phylopic_data, as_json)
   update_progress_internal("converting_to_json", "completed")
 
   api_log_info(paste("[", request_id, "] Hybrid tree JSON creation completed"))
