@@ -48,6 +48,9 @@ curl -H "X-API-Key: YOUR-API-KEY" "http://localhost:8000/api/species?search=whal
 # Generate hybrid tree (RECOMMENDED - complete coverage + ages where available)
 curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis catus" http://localhost:8000/api/full-tree-dated
 
+# Generate hybrid tree as JSON structure (for programmatic use)
+curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis catus&as_json=true" http://localhost:8000/api/full-tree-dated
+
 # Generate topology-only tree (fast, no ages)
 curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis catus" http://localhost:8000/api/tree
 
@@ -81,6 +84,123 @@ source("provision_server.R")
 ```
 
 **Important:** Always restart the R server after making code changes for them to take effect.
+
+## JSON Output Format
+
+### Using JSON Output
+
+The `/api/full-tree-dated` endpoint supports both HTML and JSON output formats:
+
+```bash
+# HTML output (default) - interactive visualization
+curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "common_names=Human,Dog&scientific_names=Homo sapiens,Canis lupus" http://localhost:8000/api/full-tree-dated
+
+# JSON output - structured data for programmatic use
+curl -X POST -H "X-API-Key: YOUR-API-KEY" -d "common_names=Human,Dog&scientific_names=Homo sapiens,Canis lupus&as_json=true" http://localhost:8000/api/full-tree-dated
+```
+
+### JSON Response Structure
+
+When `as_json=true` is specified, the response includes a `tree_json` field instead of `html`:
+
+```json
+{
+  "success": true,
+  "species_count": 2,
+  "tree_type": "hybrid_rotl_datelife",
+  "output_format": "json",
+  "tree_json": {
+    "node_label": "Common ancestor",
+    "node_type": "root",
+    "color": "#8E44AD",
+    "has_age": false,
+    "age_info": "age unavailable",
+    "age_numeric": null,
+    "node_shape": "circle",
+    "image_url": null,
+    "image_type": "none",
+    "wikipedia_text": "Common ancestor description...",
+    "wikipedia_url": null,
+    "phylopic_uuid": null,
+    "phylopic_url": null,
+    "children": [
+      {
+        "node_label": "Boreoeutheria",
+        "node_type": "taxonomic",
+        "color": "#F39C12",
+        "image_url": "https://commons.wikimedia.org/...",
+        "image_type": "wikimedia",
+        "wikipedia_text": "Boreoeutheria description...",
+        "wikipedia_url": "https://en.wikipedia.org/wiki/Boreoeutheria",
+        "children": [
+          {
+            "node_label": "Human",
+            "node_type": "species",
+            "color": "#27AE60",
+            "has_age": true,
+            "age_info": "present (0 Mya)",
+            "age_numeric": 0
+          },
+          {
+            "node_label": "Dog",
+            "node_type": "species",
+            "color": "#27AE60",
+            "has_age": true,
+            "age_info": "present (0 Mya)",
+            "age_numeric": 0
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Node Metadata Fields
+
+Each node in the JSON tree includes comprehensive metadata:
+
+**Core Properties:**
+- `node_label`: Display name with age information if available
+- `node_type`: `"root"`, `"taxonomic"`, `"ancestor"`, or `"species"`
+- `color`: Hex color code for visualization
+- `has_age`: Boolean indicating if age data is available
+- `age_info`: Human-readable age description (e.g., "65.2 Mya")
+- `age_numeric`: Numeric age value for calculations
+
+**Visual Properties:**
+- `node_shape`: `"circle"` or PhyloPic URL for custom shapes
+- `image_url`: Primary image URL (PhyloPic, Wikimedia, etc.)
+- `image_type`: `"phylopic"`, `"wikimedia"`, `"unsplash"`, `"pixabay"`, or `"none"`
+- `image_attribution`: Attribution text for images
+
+**Content Properties:**
+- `wikipedia_text`: Truncated Wikipedia introduction text
+- `wikipedia_url`: Link to Wikipedia article
+- `wikipedia_title`: Wikipedia page title
+- `phylopic_uuid`: PhyloPic silhouette UUID
+- `phylopic_url`: Direct link to PhyloPic SVG image
+- `phylopic_attribution`: PhyloPic attribution information
+
+**Tree Structure:**
+- `children`: Array of child nodes (recursive structure)
+
+### Use Cases for JSON Output
+
+**Custom Visualizations:**
+- Build D3.js, React, or other interactive visualizations
+- Create mobile app tree displays
+- Generate static diagrams or charts
+
+**Data Analysis:**
+- Extract age information for statistical analysis
+- Build phylogenetic distance matrices
+- Integrate with bioinformatics pipelines
+
+**Content Management:**
+- Store structured tree data in databases
+- Generate reports or documentation
+- Create educational materials
 
 ## Architecture Overview
 
@@ -206,6 +326,18 @@ sh/restart_server.sh
 
 ### Utility Scripts
 ```bash
+# Test hybrid tree generation (HTML output)
+sh/test.sh --simple
+
+# Test hybrid tree generation (JSON output)
+sh/test.sh --as-json --simple
+
+# Generate random hybrid tree with specific species
+sh/test.sh --species="Human (Homo sapiens), Dog (Canis lupus), Cat (Felis catus)"
+
+# Test with JSON output and custom file
+sh/test.sh --json --simple 3 my_tree.json
+
 # Clear API cache
 sh/clear_cache.sh
 
@@ -218,3 +350,13 @@ sh/generate_random.sh
 # Fetch documentation
 sh/fetch_docs.sh
 ```
+
+### Test Script Features
+The `sh/test.sh` script supports both HTML and JSON output formats:
+- `--json` or `--as-json`: Get JSON tree structure instead of HTML
+- `--simple`: Use predefined species set (Chicken, Human, Chimpanzee)
+- `--species="list"`: Use custom species in format "Common (Scientific)"
+- `--progress`: Use real-time progress monitoring
+- `--expansion-speed=N`: Set tree expansion speed in milliseconds
+
+The JSON output opens in your default browser and displays the structured tree data with full metadata.
