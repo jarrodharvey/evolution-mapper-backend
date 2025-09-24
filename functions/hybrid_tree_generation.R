@@ -1776,6 +1776,8 @@ convert_network_to_nested_json <- function(network_data, tree_data, request_id =
         if (length(geologic_match) > 0) {
           # Extract the geological period from the match
           period_text <- gsub(pattern, '\\1', geologic_match, ignore.case = TRUE, perl = TRUE)
+          # Clean HTML tags from the extracted text
+          period_text <- gsub("<[^>]*>", "", period_text)
           period_text <- trimws(period_text)
           if (nchar(period_text) > 0 && nchar(period_text) < 100) {
             metadata$geologic_age <- period_text

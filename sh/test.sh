@@ -45,7 +45,7 @@ for arg in "$@"; do
         --domain)
             USE_DOMAIN=true
             ;;
-        --json)
+        --json|--as-json)
             USE_JSON=true
             ;;
         --species=*)
@@ -64,7 +64,7 @@ for arg in "$@"; do
             echo "  --progress            Use progress tracking instead of log streaming"
             echo "  --droplet-ip          Use DO_DROPLET_IP from .Renviron"
             echo "  --domain              Use DO_DROPLET_DOMAIN from .Renviron"
-            echo "  --json                Save JSON response without HTML and open JSON file"
+            echo "  --json, --as-json     Get JSON tree structure instead of HTML visualization"
             echo "  --expansion-speed=N   Set tree expansion speed in milliseconds"
             echo "  --help                Show this help message"
             echo ""
@@ -208,7 +208,7 @@ else
     echo "Generating random hybrid tree with $COUNT species..."
 fi
 if [[ "$USE_JSON" == true ]]; then
-    echo "Output mode: JSON (without HTML)"
+    echo "Output mode: JSON tree structure"
 else
     echo "Output mode: HTML visualization"
 fi
@@ -371,6 +371,9 @@ fi
 if [[ -n "$EXPANSION_SPEED" ]]; then
     API_DATA="${API_DATA}&expansion_speed=$EXPANSION_SPEED"
 fi
+if [[ "$USE_JSON" == true ]]; then
+    API_DATA="${API_DATA}&as_json=true"
+fi
 
 # Start curl in background and write to temp file
 (curl -s -X POST \
@@ -497,9 +500,9 @@ if echo "$HYBRID_RESPONSE" | jq -r '.success' | grep -q "true"; then
     echo "✅ Hybrid tree generated successfully!"
     
     if [[ "$USE_JSON" == true ]]; then
-        # Save JSON without HTML
-        echo "$HYBRID_RESPONSE" | jq 'del(.html)' > "$OUTPUT_FILE"
-        echo "💾 JSON extraction successful (HTML removed)!"
+        # Save the complete JSON response (already contains tree_json instead of html)
+        echo "$HYBRID_RESPONSE" | jq . > "$OUTPUT_FILE"
+        echo "💾 JSON tree structure saved!"
     else
         # Extract HTML content (handle array format)
         echo "$HYBRID_RESPONSE" | jq -r 'if (.html | type) == "array" then .html[0] else .html end' > "$OUTPUT_FILE"
@@ -511,9 +514,16 @@ if echo "$HYBRID_RESPONSE" | jq -r '.success' | grep -q "true"; then
         echo "   📏 Size: $(wc -c < "$OUTPUT_FILE") bytes"
         
         if [[ "$USE_JSON" == true ]]; then
-            # Verify it's valid JSON
+            # Verify it's valid JSON and contains tree_json field
             if jq empty "$OUTPUT_FILE" 2>/dev/null; then
-                echo "   ✅ Valid JSON document confirmed"
+                if jq -e '.tree_json' "$OUTPUT_FILE" > /dev/null 2>&1; then
+                    echo "   ✅ Valid JSON tree structure confirmed"
+                    # Count nodes in the tree
+                    NODE_COUNT=$(jq '[.. | objects | select(has("node_label"))] | length' "$OUTPUT_FILE" 2>/dev/null || echo "unknown")
+                    echo "   🌳 Tree contains $NODE_COUNT nodes"
+                else
+                    echo "   ⚠️  Warning: JSON missing tree_json field"
+                fi
             else
                 echo "   ⚠️  Warning: File may not be valid JSON"
             fi
@@ -557,8 +567,16 @@ if echo "$HYBRID_RESPONSE" | jq -r '.success' | grep -q "true"; then
         fi
         
         echo ""
+        echo "====== CURL COMMAND FOR REPRODUCIBILITY ======"
+        echo "curl -X POST \\"
+        echo "  -H \"X-API-Key: $API_KEY\" \\"
+        echo "  -H \"Content-Type: application/x-www-form-urlencoded\" \\"
+        echo "  -d \"$API_DATA\" \\"
+        echo "  \"$BASE_URL/api/full-tree-dated\""
+        echo "==============================================="
+        echo ""
         if [[ "$USE_JSON" == true ]]; then
-            echo "🚀 Opening JSON file..."
+            echo "🚀 Opening JSON tree structure in browser..."
         else
             echo "🚀 Opening tree visualization..."
         fi
