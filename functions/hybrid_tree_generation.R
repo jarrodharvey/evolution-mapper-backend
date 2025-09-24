@@ -1056,7 +1056,7 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
       if (length(match_idx) > 0) {
         species_scientific <- species_data$scientific[match_idx[1]]
         if (species_has_datelife_data(species_scientific)) {
-          return(list(info = "present (0 Mya)", has_age = TRUE))
+          return(list(info = "present", has_age = FALSE))
         }
       }
       return(list(info = "present", has_age = FALSE))
@@ -1184,7 +1184,7 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
       if (length(match_idx) > 0) {
         species_scientific <- species_data$scientific[match_idx[1]]
         if (species_has_datelife_data(species_scientific)) {
-          return(list(info = "present (0 Mya)", has_age = TRUE))
+          return(list(info = "present", has_age = FALSE))
         }
       }
       return(list(info = "present", has_age = FALSE))
