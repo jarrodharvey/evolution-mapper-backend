@@ -1896,6 +1896,48 @@ convert_network_to_nested_json <- function(network_data, tree_data, request_id =
     return(metadata)
   }
 
+  # Helper function to count total descendants (leaf nodes) recursively
+  count_total_descendants <- function(node) {
+    if (is.null(node$children) || length(node$children) == 0) {
+      # Leaf node has 0 descendants
+      return(0)
+    }
+
+    # Internal node: count all descendants recursively
+    total_count <- length(node$children)  # Direct children count
+    for (child in node$children) {
+      total_count <- total_count + count_total_descendants(child)
+    }
+    return(total_count)
+  }
+
+  # Helper function to sort children by total descendant count (fewest first)
+  sort_children_by_descendant_count <- function(children) {
+    if (is.null(children) || length(children) <= 1) {
+      return(children)
+    }
+
+    # Calculate descendant counts for each child
+    children_with_counts <- list()
+    for (i in 1:length(children)) {
+      child <- children[[i]]
+      descendant_count <- count_total_descendants(child)
+      children_with_counts[[i]] <- list(
+        node = child,
+        count = descendant_count
+      )
+    }
+
+    # Sort by descendant count (ascending - leaf nodes first)
+    sorted_indices <- order(sapply(children_with_counts, function(x) x$count))
+    sorted_children <- list()
+    for (i in sorted_indices) {
+      sorted_children[[length(sorted_children) + 1]] <- children_with_counts[[i]]$node
+    }
+
+    return(sorted_children)
+  }
+
   # Helper function to build tree recursively with cycle detection
   build_tree_recursive <- function(parent_name, visited = character(0)) {
     # Cycle detection - prevent infinite recursion
@@ -1934,7 +1976,9 @@ convert_network_to_nested_json <- function(network_data, tree_data, request_id =
     }
 
     if (length(children) > 0) {
-      node_metadata$children <- children
+      # Sort children by total descendant count (leaf nodes first)
+      sorted_children <- sort_children_by_descendant_count(children)
+      node_metadata$children <- sorted_children
     }
     return(node_metadata)
   }
