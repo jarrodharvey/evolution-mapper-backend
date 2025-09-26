@@ -123,7 +123,7 @@ generate_info_panel_html <- function(node_data) {
   return(info_panel_html)
 }
 
-# Format the panel content with proper structure
+# Format the panel content with proper structure and close button
 format_panel_content <- function(node_data) {
   # Handle both naming conventions: "to" (ROTL) and "Child" (DateLife)
   node_name <- if (is.list(node_data) && "to" %in% names(node_data)) {
@@ -136,90 +136,89 @@ format_panel_content <- function(node_data) {
     "Unknown node"
   }
   
+  content_html <- NULL
+
   # Handle root node
   if (is.list(node_data) && "NodeType" %in% names(node_data) && node_data$NodeType == "root") {
-    return(paste0(
+    content_html <- paste0(
       '<h4>', node_name, '</h4>',
       '<p class="ancestor-type">Conceptual root ancestor</p>',
       '<p class="ancestor-description">This represents the most recent common ancestor of all species in your tree.</p>'
-    ))
-  }
-  
-  # Handle nodes with age data
-  if (is.list(node_data) && all(c("Age", "AgeValid", "AgeSource") %in% names(node_data))) {
-    
-    # Check if age is invalid or unavailable
+    )
+  } else if (is.list(node_data) && all(c("Age", "AgeValid", "AgeSource") %in% names(node_data))) {
+    # Handle nodes with age data
     if (is.na(node_data$Age) || !node_data$AgeValid) {
       reason <- if ("ValidationNotes" %in% names(node_data) && !is.na(node_data$ValidationNotes)) {
         node_data$ValidationNotes
       } else {
         "No validated age data available"
       }
-      
+
       content_html <- paste0(
         '<h4>', node_name, '</h4>',
         '<p class="ancestor-type">Evolutionary ancestor</p>',
         '<p class="age-unavailable">Age data unavailable</p>'
       )
-      
-      # Add silhouette and Wikipedia sections side by side for taxonomic nodes even without age data
-      if (is.list(node_data) && should_add_taxonomic_content(node_data)) {
-        content_html <- paste0(content_html, format_combined_taxonomic_section(node_data))
+
+      if (!is.null(reason) && reason != "") {
+        content_html <- paste0(content_html,
+          '<p class="age-reason">', reason, '</p>'
+        )
       }
-      
-      return(content_html)
-    }
-    
-    # Valid age - create comprehensive panel
-    age_text <- sprintf("%.1f million years ago", node_data$Age)
-    confidence_stars <- get_confidence_stars(node_data$AgeSource)
-    source_text <- format_age_source(node_data$AgeSource)
-    
-    content_html <- paste0(
-      '<h4>', node_name, '</h4>',
-      '<p class="ancestor-type">Evolutionary ancestor</p>',
-      '<div class="age-info">',
-      '<p class="age-main">Lived approximately <strong>', age_text, '</strong></p>'
-    )
-    
-    # Add geological period if available
-    geological_period <- get_geological_period(node_data$Age)
-    if (!is.null(geological_period)) {
-      content_html <- paste0(content_html, 
-        '<p class="geological-period">During the <em>', geological_period, ' Period</em></p>'
+    } else {
+      age_text <- sprintf("%.1f million years ago", node_data$Age)
+      confidence_stars <- get_confidence_stars(node_data$AgeSource)
+      source_text <- format_age_source(node_data$AgeSource)
+
+      content_html <- paste0(
+        '<h4>', node_name, '</h4>',
+        '<p class="ancestor-type">Evolutionary ancestor</p>',
+        '<div class="age-info">',
+        '<p class="age-main">Lived approximately <strong>', age_text, '</strong></p>'
+      )
+
+      geological_period <- get_geological_period(node_data$Age)
+      if (!is.null(geological_period)) {
+        content_html <- paste0(content_html,
+          '<p class="geological-period">During the <em>', geological_period, ' Period</em></p>'
+        )
+      }
+
+      content_html <- paste0(content_html,
+        '<div class="confidence-info">',
+        '<p class="data-source">', source_text, '</p>',
+        '</div>',
+        '</div>'
       )
     }
-    
-    # Add source information (removed star rating for compactness)
-    content_html <- paste0(content_html,
-      '<div class="confidence-info">',
-      '<p class="data-source">', source_text, '</p>',
-      '</div>',
-      '</div>'
-    )
-    
-    # Add silhouette and Wikipedia sections side by side for nodes that have taxonomic information
-    # This includes both pure taxonomic nodes AND hybrid nodes with both age and taxonomic data
+
     if (is.list(node_data) && should_add_taxonomic_content(node_data)) {
       content_html <- paste0(content_html, format_combined_taxonomic_section(node_data))
     }
-    
-    return(content_html)
   }
-  
+
   # Fallback for unknown node types
-  content_html <- paste0(
-    '<h4>', node_name, '</h4>',
-    '<p class="ancestor-type">Unknown ancestor</p>',
-    '<p>Limited information available for this node.</p>'
-  )
-  
-  # Add silhouette and Wikipedia sections side by side for nodes with taxonomic information even in fallback case
-  if (is.list(node_data) && should_add_taxonomic_content(node_data)) {
-    content_html <- paste0(content_html, format_combined_taxonomic_section(node_data))
+  if (is.null(content_html)) {
+    content_html <- paste0(
+      '<h4>', node_name, '</h4>',
+      '<p class="ancestor-type">Unknown ancestor</p>',
+      '<p>Limited information available for this node.</p>'
+    )
+
+    if (is.list(node_data) && should_add_taxonomic_content(node_data)) {
+      content_html <- paste0(content_html, format_combined_taxonomic_section(node_data))
+    }
   }
-  
-  return(content_html)
+
+  # Wrap content with panel structure and close button for JavaScript showInfoPanel
+  wrapped_html <- paste0(
+    '<div class="info-panel-content">',
+    content_html,
+    '</div>',
+    '<button class="close-panel" onclick="closeInfoPanel(this)">×</button>'
+  )
+
+  return(wrapped_html)
 }
 
 # Helper function to determine if a node should get taxonomic content (silhouettes/Wikipedia)
@@ -543,7 +542,6 @@ format_wikipedia_content <- function(node_data) {
 # Generate CSS styles for the info panel system
 generate_info_panel_css <- function(panel_width = 800, text_column_width = 350) {
   return(paste0('
-<style>
 /* Info Panel System Styles */
 .ancestor-info-container {
   position: relative;
@@ -1026,7 +1024,6 @@ generate_info_panel_css <- function(panel_width = 800, text_column_width = 350) 
     font-size: 14px;
   }
 }
-</style>
   '))
 }
 

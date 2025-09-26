@@ -306,6 +306,19 @@ enhance_tree_html_with_info_panels <- function(tree_html, network_data) {
       .style("z-index", "1000")
       .style("width", "fit-content")
       .html(panelHtml);
+
+    // Ensure close button exists even if panelHtml lacked one
+    var closeButton = panel.select(".close-panel");
+    if (closeButton.empty()) {
+      closeButton = panel.append("button")
+        .attr("class", "close-panel")
+        .attr("type", "button")
+        .html("&times;");
+    }
+
+    closeButton.on("click", function() {
+      closeInfoPanel(this);
+    });
       
     // Position panel at the center of the SVG container to avoid cutoffs
     var svgElement = document.querySelector("svg");
@@ -339,8 +352,21 @@ enhance_tree_html_with_info_panels <- function(tree_html, network_data) {
       });
     }, 10);
   }
+
+  // Function to close info panel via close button
+  function closeInfoPanel(button) {
+    console.log("Close button clicked");
+    // Find the parent info panel and remove it
+    var panel = d3.select(button.parentNode);
+    if (!panel.empty()) {
+      panel.remove();
+      // Clean up click-outside handler
+      d3.select("body").on("click.closePanel", null);
+      console.log("Info panel closed via close button");
+    }
+  }
   </script>')
-  
+
   # NOTE: Duration modification is now handled via htmlwidgets::onRender() in hybrid_tree_generation.R
   # This is more reliable than regex replacement as it works at the JavaScript runtime level
 
@@ -863,6 +889,19 @@ enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, c
       .style("z-index", "1000")
       .style("width", "fit-content")
       .html(panelHtml);
+
+    // Ensure close button exists even if panelHtml lacked one
+    var closeButton = panel.select(".close-panel");
+    if (closeButton.empty()) {
+      closeButton = panel.append("button")
+        .attr("class", "close-panel")
+        .attr("type", "button")
+        .html("&times;");
+    }
+
+    closeButton.on("click", function() {
+      closeInfoPanel(this);
+    });
       
     // Position panel at the center of the SVG container to avoid cutoffs
     var svgElement = document.querySelector("svg");
@@ -896,8 +935,21 @@ enhance_tree_html_with_info_panels_cached <- function(tree_html, network_data, c
       });
     }, 10);
   }
+
+  // Function to close info panel via close button
+  function closeInfoPanel(button) {
+    console.log("Close button clicked");
+    // Find the parent info panel and remove it
+    var panel = d3.select(button.parentNode);
+    if (!panel.empty()) {
+      panel.remove();
+      // Clean up click-outside handler
+      d3.select("body").on("click.closePanel", null);
+      console.log("Info panel closed via close button");
+    }
+  }
   </script>')
-  
+
   # Add only our new info panel script (remove old conflicting system)
   tree_html <- gsub("</body>", paste0(info_panel_script, "</body>"), tree_html)
   
