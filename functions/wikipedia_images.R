@@ -340,32 +340,6 @@ format_image_attribution <- function(license_info) {
   return(paste("Image by", artist, "via Wikipedia (", license, ")"))
 }
 
-# Generate HTML for Wikipedia image display in info panels  
-format_wikipedia_image_html <- function(image_data, max_display_width = 100) {
-  if (!image_data$success) {
-    return("")  # Return empty string if no image available
-  }
-  
-  # Calculate display dimensions while maintaining aspect ratio
-  display_width <- min(image_data$image_width, max_display_width)
-  aspect_ratio <- image_data$image_height / image_data$image_width
-  display_height <- round(display_width * aspect_ratio)
-  
-  # Create HTML for image display with attribution
-  image_html <- paste0(
-    '<div class="wikipedia-image-section">',
-    '<div class="wikipedia-image-container">',
-    '<img src="', image_data$image_url, 
-    '" alt="', image_data$taxonomic_group, ' image from Wikipedia"',
-    ' class="wikipedia-taxonomic-image"',
-    ' style="max-width:', display_width, 'px; max-height:', display_height, 'px;"',
-    ' loading="lazy" />',
-    '</div>',
-    '</div>'
-  )
-  
-  return(image_html)
-}
 
 # Test function to verify Wikipedia image API functionality
 test_wikipedia_image_connection <- function() {
