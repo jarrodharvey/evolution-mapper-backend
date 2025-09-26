@@ -98,7 +98,7 @@ main() {
         exit 1
     fi
 
-    nohup R -e "library(plumber); pr('plumber.R') %>% pr_run(port = 8000)" > "$LOG_DIR/backend.log" 2>&1 &
+    nohup R -e "library(plumber); pr('plumber.R') %>% pr_run(host = '0.0.0.0', port = 8000)" > "$LOG_DIR/backend.log" 2>&1 &
     BACKEND_PID=$!
     echo $BACKEND_PID > "$LOG_DIR/backend.pid"
 
@@ -111,7 +111,8 @@ main() {
     success "🎉 Backend server restarted successfully!"
     echo ""
     echo "📍 Server URL:"
-    echo "   Backend API:          http://localhost:8000"
+    echo "   Backend API (local):  http://localhost:8000"
+    echo "   Backend API (LAN):    http://<your_local_ip>:8000"
     echo "   API Documentation:    http://localhost:8000/__docs__/"
     echo ""
     echo "📝 Log File:"
