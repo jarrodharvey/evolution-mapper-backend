@@ -20,14 +20,6 @@ tryCatch({
   cat("Warning: Could not load OpenTreeChronograms dataset:", e$message, "\n")
 })
 
-#' Optimized DateLife search using proper local-only processing (16.7x speedup)
-#' @param input Character vector of species names (scientific names)
-#' @return DateLife result using local chronogram cache with no external API calls
-get_datelife_result_local <- function(input) {
-  # Use DateLife's built-in local caching with TNRS disabled for maximum performance
-  # This eliminates external API calls while maintaining full DateLife functionality
-  return(get_datelife_result(input = input, use_tnrs = FALSE))
-}
 
 #' Function to get common names from scientific names using database
 #' @param scientific_names Vector of scientific names

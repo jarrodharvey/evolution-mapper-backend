@@ -539,69 +539,6 @@ format_wikipedia_content <- function(node_data) {
   )
 }
 
-# Format silhouette section for taxonomic nodes (kept for backward compatibility)
-format_silhouette_section <- function(node_data) {
-  # Check if silhouette data is available
-  has_silhouette <- !is.null(node_data$silhouette_html) && 
-                    !is.na(node_data$silhouette_html) && 
-                    nchar(as.character(node_data$silhouette_html)) > 0
-  
-  if (has_silhouette) {
-    return(node_data$silhouette_html)
-  } else {
-    return("")  # Return empty string if no silhouette available
-  }
-}
-
-# Format Wikipedia section for taxonomic nodes
-format_wikipedia_section <- function(node_data) {
-  # Check if Wikipedia data is available
-  has_wikipedia <- !is.null(node_data$wikipedia_summary) && 
-                   !is.na(node_data$wikipedia_summary) && 
-                   nchar(as.character(node_data$wikipedia_summary)) > 0
-  
-  has_wikipedia_error <- !is.null(node_data$wikipedia_error) && 
-                        !is.na(node_data$wikipedia_error) && 
-                        nchar(as.character(node_data$wikipedia_error)) > 0
-  
-  if (has_wikipedia) {
-    # Display Wikipedia content
-    wikipedia_html <- paste0(
-      '<div class="wikipedia-section">',
-      '<div class="wikipedia-content">',
-      '<div class="wikipedia-summary">', node_data$wikipedia_summary, '</div>',
-      '<a href="', node_data$wikipedia_url, '" target="_blank" rel="noopener noreferrer" class="wikipedia-link">',
-      'Read more on Wikipedia →',
-      '</a>',
-      '</div>',
-      '</div>'
-    )
-  } else if (has_wikipedia_error) {
-    # Show specific error message
-    wikipedia_html <- paste0(
-      '<div class="wikipedia-section">',
-      '<div class="wikipedia-content">',
-      '<div class="wikipedia-error" style="color: #e74c3c; font-size: 12px; font-style: italic; padding: 8px; border: 1px solid #e74c3c; border-radius: 4px; background-color: #fdf2f2;">',
-      '⚠️ ', node_data$wikipedia_error,
-      '</div>',
-      '</div>',
-      '</div>'
-    )
-  } else {
-    # Show generic message that Wikipedia data is not available
-    wikipedia_html <- paste0(
-      '<div class="wikipedia-section">',
-      '<div class="wikipedia-content">',
-      '<p class="wikipedia-unavailable" style="color: #95a5a6; font-size: 13px; font-style: italic;">',
-      'Wikipedia information not available for this taxonomic group',
-      '</p>',
-      '</div>',
-      '</div>'
-    )
-  }
-  
-  return(wikipedia_html)
-}
 
 # Generate CSS styles for the info panel system
 generate_info_panel_css <- function(panel_width = 800, text_column_width = 350) {
