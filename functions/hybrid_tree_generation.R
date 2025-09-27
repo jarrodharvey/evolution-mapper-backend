@@ -1608,12 +1608,23 @@ transform_hybrid_to_info_panel_format <- function(network_data) {
 #' @param tree_data Enhanced data frame with info panel data
 #' @param request_id Optional request ID for logging correlation
 #' @return Nested list structure representing the tree
-convert_network_to_nested_json <- function(network_data, tree_data, request_id = NULL, phylopic_data = NULL, as_json = FALSE) {
+convert_network_to_nested_json <- function(network_data, tree_data, request_id = NULL, phylopic_data = NULL, as_json = FALSE, progress_token = NULL) {
   if (is.null(request_id)) {
     request_id <- "json_convert"
   }
 
+  # Helper function to update progress if token provided
+  update_progress_internal <- function(step_name, status = "completed", additional_data = NULL) {
+    if (!is.null(progress_token) && progress_token != "") {
+      update_progress(progress_token, step_name, status, additional_data)
+    }
+  }
+
   api_log_info(paste("[", request_id, "] Converting network data to nested JSON structure..."))
+
+  # Step 1: Processing tree nodes and metadata
+  update_progress_internal("processing_tree_nodes", "in_progress",
+                         list(step = "Processing tree nodes and metadata"))
 
   # Create a mapping from child names to their data
   child_to_data <- list()
@@ -1799,10 +1810,9 @@ convert_network_to_nested_json <- function(network_data, tree_data, request_id =
 
         if (nchar(taxonomic_name) > 0) {
           tryCatch({
-            source("functions/wikipedia_images.R", local = TRUE)  # Contains attribution helper functions
-            source("functions/wikimedia_images.R", local = TRUE)
-            api_log_info(paste("[JSON] Calling get_wikimedia_image for:", taxonomic_name))
-            wikimedia_result <- get_wikimedia_image(taxonomic_name, target_width = 200)
+            source("functions/cached_api_functions.R", local = TRUE)  # Load cached functions
+            api_log_info(paste("[JSON] Calling cached_get_wikimedia_image_enhanced for:", taxonomic_name))
+            wikimedia_result <- cached_get_wikimedia_image_enhanced(taxonomic_name, target_width = 200)
             if (wikimedia_result$success) {
               api_log_info(paste("[JSON] Wikimedia image found:", wikimedia_result$image_url))
               metadata$image_url <- wikimedia_result$image_url
@@ -2110,11 +2120,8 @@ create_hybrid_tree_json <- function(network_data, request_id = NULL, progress_to
   })
   update_progress_internal("collecting_phylopic_data", "completed")
 
-  # Step 5.4: Convert to nested JSON structure
-  update_progress_internal("converting_to_json", "in_progress",
-                         list(step = "Converting tree structure to nested JSON"))
-  tree_json <- convert_network_to_nested_json(network_data, tree_data, request_id, phylopic_data, as_json)
-  update_progress_internal("converting_to_json", "completed")
+  # Step 5.4: Convert to nested JSON structure (with granular progress tracking)
+  tree_json <- convert_network_to_nested_json(network_data, tree_data, request_id, phylopic_data, as_json, progress_token)
 
   api_log_info(paste("[", request_id, "] Hybrid tree JSON creation completed"))
   return(tree_json)
