@@ -49,7 +49,11 @@ sourcing_order <- c(
   "functions/tree_html_enhancement.R",
   "functions/rotl_tree_generation.R",
   "functions/datelife_tree_generation.R",
-  "functions/hybrid_tree_generation.R",
+  "functions/hybrid_input_validation.R",
+  "functions/hybrid_tree_conversion.R",
+  "functions/hybrid_json_output.R",
+  "functions/hybrid_visualization.R",
+  "functions/hybrid_tree_controller.R",
   "functions/attribution_extractor.R"
   # Skip show_function_relationships.R to avoid circular dependencies
 )
