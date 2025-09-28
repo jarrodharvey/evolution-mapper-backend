@@ -329,6 +329,7 @@ generate_dated_tree_chronos <- function(rotl_tree, datelife_results, species_dat
     branching_times_tree <- branching.times(dated_tree)
     root_age <- max(branching_times_tree)
     api_log_info(paste("[", request_id, "] Chronos root age:", round(root_age, 1), "Mya (integrated clock model)"))
+
     
     # Clean tip labels to match DateLife format for comparison
     clean_tip_labels <- gsub("_ott\\d+", "", dated_tree$tip.label)
@@ -367,6 +368,7 @@ generate_dated_tree_chronos <- function(rotl_tree, datelife_results, species_dat
             node_depths <- node.depth.edgelength(dated_tree)
             root_depth <- max(node_depths)
             node_age <- root_depth - node_depths[mrca_node]
+
             
             if (!is.na(node_age)) {
               # Store age by node number (preferred method)

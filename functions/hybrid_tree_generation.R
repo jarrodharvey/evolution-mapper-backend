@@ -965,21 +965,30 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
   # Process remaining (clean) pairwise age data
   for (key in names(filtered_ancestor_ages)) {
     if (!startsWith(key, "node_") && grepl("\\|", key)) {
-      # This is a pairwise key like "Characidium_fasciatum|Crenimugil_crenilabis"
-      species_pair <- strsplit(key, "\\|")[[1]]
-      
+      species_list <- strsplit(key, "\\|")[[1]]
+
+      # CRITICAL FIX: Distinguish between pairwise keys and multi-species root keys
+      if (length(species_list) > 2) {
+        # This is a multi-species root key - skip to prevent incorrect MRCA assignment
+        api_log_info(paste("[", request_id, "] Skipping multi-species root key (", length(species_list), "species):", key, "- root ages should not contaminate internal nodes"))
+        next
+      }
+
+      # This is a true pairwise key like "Characidium_fasciatum|Crenimugil_crenilabis"
+      species_pair <- species_list
+
       # Find these species in ROTL tree tips
       tip1 <- NULL
       tip2 <- NULL
-      
+
       for (tip_label in phylo_tree$tip.label) {
         tip_clean <- gsub("_ott\\d+", "", tip_label)
         tip_clean <- gsub("_", " ", tip_clean)
-        
+
         # Match with DateLife species names
         species1_clean <- gsub("_", " ", species_pair[1])
         species2_clean <- gsub("_", " ", species_pair[2])
-        
+
         if (tip_clean == species1_clean || tip_clean == species_pair[1]) {
           tip1 <- which(phylo_tree$tip.label == tip_label)
         }
@@ -987,7 +996,7 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
           tip2 <- which(phylo_tree$tip.label == tip_label)
         }
       }
-      
+
       # Find MRCA in ROTL tree
       if (!is.null(tip1) && !is.null(tip2)) {
         mrca_node <- getMRCA(phylo_tree, tip = c(tip1, tip2))
@@ -1077,6 +1086,14 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
       rotl_node_key <- paste0("rotl_node_", node_num)
       if (rotl_node_key %in% names(rotl_node_ages)) {
         ancestor_age_mya <- round(rotl_node_ages[[rotl_node_key]], 1)
+
+        # PHYLOGENETIC VALIDATION: Check if this age conflicts with any child node ages
+        max_child_age <- get_max_child_age(node_num)
+        if (!is.na(max_child_age) && ancestor_age_mya <= max_child_age) {
+          api_log_info(paste("DEBUG CHRONOS: PHYLOGENETIC CONFLICT - Node", node_num, "chronos age", ancestor_age_mya, "Mya would be younger than child age", max_child_age, "Mya - age assignment REJECTED"))
+          return(list(info = "age unavailable", has_age = FALSE))
+        }
+
         return(list(info = paste0(ancestor_age_mya, " Mya"), has_age = TRUE))
       }
       
@@ -1315,22 +1332,12 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
     method_exists <- exists("age_assignment_method")
     current_method <- if (method_exists) age_assignment_method else "UNDEFINED"
     
-    # Only log for internal nodes to avoid spam
-    if (node_num > n_tips) {
-      api_log_info(paste("DEBUG: get_age_info node", node_num, "- method exists:", method_exists, "method:", current_method))
-    }
     
     # Dispatch to the appropriate method based on how ages were assigned
     if (exists("age_assignment_method") && age_assignment_method == "direct_pairwise_fallback") {
-      if (node_num > n_tips) {
-        api_log_info(paste("DEBUG: Using FALLBACK method for node", node_num))
-      }
       return(assign_fallback_ages(node_num, node_type))
     } else {
       # Default to chronos method (or when no age method is set)
-      if (node_num > n_tips) {
-        api_log_info(paste("DEBUG: Using CHRONOS method for node", node_num))
-      }
       return(assign_chronos_ages(node_num, node_type))
     }
   }
@@ -1420,10 +1427,9 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
     node_label_cache[[as.character(node_num)]] <- node_label
   }
   
-  # FINAL PHYLOGENETIC VALIDATION: Remove conflicting parent ages (fallback method only)
-  if (exists("age_assignment_method") && age_assignment_method == "direct_pairwise_fallback") {
-    validate_phylogenetic_consistency_final()
-  }
+  # FINAL PHYLOGENETIC VALIDATION: Remove conflicting parent ages (ALL methods)
+  # This is critical to prevent phantom ages from chronos extrapolations
+  validate_phylogenetic_consistency_final()
   
   # Process each edge in the ROTL tree using cached data
   for (i in 1:nrow(phylo_tree$edge)) {
