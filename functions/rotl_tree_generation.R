@@ -10,8 +10,7 @@ library(RSQLite)
 library(DBI)
 library(dplyr)
 
-source("functions/color_config.R")
-source("functions/tree_html_enhancement.R")
+# All required functions are sourced at startup in plumber.R
 
 # Calculate dynamic link length based on label lengths
 calculate_dynamic_link_length <- function(network_data, base_length = 80, char_multiplier = 3) {

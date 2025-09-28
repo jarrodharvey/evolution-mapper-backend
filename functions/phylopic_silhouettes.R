@@ -4,8 +4,7 @@
 library(rphylopic)
 library(jsonlite)
 
-# Source shared logging configuration
-source("functions/logging_config.R")
+# All required functions are sourced at startup in plumber.R
 
 # Get a random silhouette UUID for a taxonomic group
 get_random_silhouette_uuid <- function(taxonomic_name) {
@@ -285,9 +284,9 @@ create_phylopic_node_replacement_data <- function(network_data, request_id = NUL
     request_id <- "phylopic_nodes"
   }
   
-  # Load cached API functions if available for better performance
+  # Cached API functions are already sourced at startup
   tryCatch({
-    source("functions/cached_api_functions.R", local = TRUE)
+    # Check if cached functions are available
     api_log_info(paste("[", request_id, "] Using cached PhyloPic functions for improved performance"))
     use_cache <- TRUE
   }, error = function(e) {

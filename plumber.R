@@ -28,21 +28,34 @@ function(req, res) {
   forward()
 }
 
-# Source logging configuration first
-source("functions/logging_config.R")
+# Source all function files at startup in dependency order
+library(purrr)
 
-# Source progress tracking functions
-source("functions/progress_tracking.R")
+# Define sourcing order to handle dependencies
+sourcing_order <- c(
+  "functions/logging_config.R",
+  "functions/caching_config.R",
+  "functions/parallel_config.R",
+  "functions/progress_tracking.R",
+  "functions/wikipedia_api.R",
+  "functions/phylopic_silhouettes.R",
+  "functions/wikipedia_images.R",
+  "functions/wikimedia_images.R",
+  "functions/cached_api_functions.R",  # Must come after the base functions it caches
+  "functions/color_config.R",
+  "functions/datelife_efficiency.R",
+  "functions/modern_age_mapping.R",
+  "functions/info_panel_system.R",
+  "functions/tree_html_enhancement.R",
+  "functions/rotl_tree_generation.R",
+  "functions/datelife_tree_generation.R",
+  "functions/hybrid_tree_generation.R",
+  "functions/attribution_extractor.R"
+  # Skip show_function_relationships.R to avoid circular dependencies
+)
 
-# Source parallel processing configuration
-source("functions/parallel_config.R")
-
-# Source tree generation functions
-source("functions/rotl_tree_generation.R")
-source("functions/datelife_tree_generation.R")
-source("functions/hybrid_tree_generation.R")
-source("functions/wikipedia_api.R")
-source("functions/attribution_extractor.R")
+# Source files in order
+purrr::walk(sourcing_order, source)
 
 # Required libraries
 library(DBI)

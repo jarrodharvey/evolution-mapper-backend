@@ -4,8 +4,7 @@
 library(memoise)
 library(cachem)
 
-# Source shared logging configuration
-source("functions/logging_config.R")
+# All required functions are sourced at startup in plumber.R
 
 # Create disk cache in cache/ directory
 # Max size: 500MB, Max age: 24 hours (86400 seconds)

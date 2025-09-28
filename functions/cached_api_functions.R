@@ -1,12 +1,7 @@
 # Cached API Functions for Info Panel System
 # Implements memoised versions of Wikipedia and PhyloPic functions for improved performance
 
-# Load required libraries and functions
-source("functions/caching_config.R")
-source("functions/wikipedia_api.R")
-source("functions/phylopic_silhouettes.R")
-source("functions/wikipedia_images.R")
-source("functions/wikimedia_images.R")
+# All required functions are sourced at startup in plumber.R
 
 # Create memoised functions without logging first
 memoised_get_wikipedia_intro <- memoise(get_wikipedia_intro, cache = wikipedia_cache)
@@ -32,8 +27,7 @@ cached_get_wikipedia_intro <- function(taxonomic_group, truncate_length = 300) {
   }, error = function(e) {
     # If memoised function fails due to missing dependencies, call original function directly
     api_log_warn(paste("Memoised Wikipedia function failed, calling original:", e$message))
-    # Re-source the wikipedia functions to ensure they're available
-    source("functions/wikipedia_api.R", local = TRUE)
+    # All functions are already sourced at startup
     result <- get_wikipedia_intro(taxonomic_group, truncate_length)
     return(result)
   })
@@ -95,8 +89,7 @@ cached_get_silhouette_data <- function(taxonomic_name) {
   }, error = function(e) {
     # If memoised function fails due to missing dependencies, call original function directly
     api_log_warn(paste("Memoised PhyloPic function failed, calling original:", e$message))
-    # Re-source the phylopic functions to ensure they're available
-    source("functions/phylopic_silhouettes.R", local = TRUE)
+    # All functions are already sourced at startup
     result <- get_silhouette_data(taxonomic_name)
     return(result)
   })
@@ -143,8 +136,7 @@ cached_get_wikipedia_main_image <- function(taxonomic_group, target_width = 800)
   }, error = function(e) {
     # If memoised function fails due to missing dependencies, call original function directly
     api_log_warn(paste("Memoised Wikipedia image function failed, calling original:", e$message))
-    # Re-source the wikipedia image functions to ensure they're available
-    source("functions/wikipedia_images.R", local = TRUE)
+    # All functions are already sourced at startup
     result <- get_wikipedia_main_image(taxonomic_group, target_width)
     return(result)
   })
@@ -175,8 +167,7 @@ cached_get_wikimedia_image_enhanced <- function(taxonomic_group, target_width = 
   }, error = function(e) {
     # If memoised function fails due to missing dependencies, call original function directly
     api_log_warn(paste("Memoised Wikimedia image function failed, calling original:", e$message))
-    # Re-source the wikimedia image functions to ensure they're available
-    source("functions/wikimedia_images.R", local = TRUE)
+    # All functions are already sourced at startup
     result <- get_wikimedia_image_enhanced(taxonomic_group, target_width)
     return(result)
   })

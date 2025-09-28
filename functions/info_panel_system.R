@@ -66,24 +66,10 @@ lookup_scientific_name <- function(common_name) {
   })
 }
 
-# Source Wikipedia API functions
-source("functions/wikipedia_api.R")
-
-# Source Wikipedia image API functions
-source("functions/wikipedia_images.R")
-
-
-# Source PhyloPic silhouette functions
-source("functions/phylopic_silhouettes.R")
-
-# Source cached API functions for improved performance
-source("functions/cached_api_functions.R")
+# All required functions are sourced at startup in plumber.R
 
 # Load parallel processing library
 library(parallel)
-
-# Source shared logging configuration
-source("functions/logging_config.R")
 
 
 

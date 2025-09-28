@@ -11,16 +11,7 @@ library(DBI)
 library(dplyr)
 library(memoise)
 
-# Source shared logging configuration
-source("functions/logging_config.R")
-
-# Source progress tracking functions
-source("functions/progress_tracking.R")
-
-source("functions/rotl_tree_generation.R")
-source("functions/datelife_tree_generation.R")  # For optimized DateLife functions
-source("functions/datelife_efficiency.R")  # For DateLife efficiency optimizations
-source("functions/color_config.R")
+# All required functions are sourced at startup in plumber.R
 
 #' Clean scientific names by removing parenthetical addendums
 #' @param scientific_names Vector of scientific names
@@ -625,8 +616,7 @@ generate_hybrid_tree_html <- function(common_names, scientific_names, request_id
       tryCatch({
         api_log_info(paste("[", request_id, "] Using modern chronos approach for DateLife age calibration...", sep=""))
         
-        # Source the modern age mapping functions
-        source("functions/modern_age_mapping.R")
+        # Modern age mapping functions are already sourced at startup
         
         # Create species data frame for chronos
         species_data_for_chronos <- data.frame(
@@ -1816,7 +1806,7 @@ convert_network_to_nested_json <- function(network_data, tree_data, request_id =
 
         if (nchar(taxonomic_name) > 0) {
           tryCatch({
-            source("functions/cached_api_functions.R", local = TRUE)  # Load cached functions
+            # Cached functions are already sourced at startup
             api_log_info(paste("[JSON] Calling cached_get_wikimedia_image_enhanced for:", taxonomic_name))
             wikimedia_result <- cached_get_wikimedia_image_enhanced(taxonomic_name, target_width = 200)
             if (wikimedia_result$success) {
@@ -2113,7 +2103,7 @@ create_hybrid_tree_json <- function(network_data, request_id = NULL, progress_to
                          list(step = "Collecting PhyloPic metadata for JSON output"))
   phylopic_data <- NULL
   tryCatch({
-    source("functions/phylopic_silhouettes.R", local = TRUE)
+    # PhyloPic functions are already sourced at startup
     phylopic_json_raw <- create_phylopic_node_replacement_data(network_data, request_id)
     if (!is.null(phylopic_json_raw) && phylopic_json_raw != "{}") {
       phylopic_data <- jsonlite::fromJSON(phylopic_json_raw)

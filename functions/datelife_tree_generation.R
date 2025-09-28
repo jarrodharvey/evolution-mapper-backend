@@ -8,9 +8,7 @@ library(RSQLite)
 library(DBI)
 library(dplyr)
 library(colorspace)
-source("functions/tree_html_enhancement.R")
-
-source("functions/color_config.R")
+# All required functions are sourced at startup in plumber.R
 
 # Load OpenTreeChronograms dataset without loading the package to avoid function conflicts
 tryCatch({

@@ -5,8 +5,7 @@
 library(httr2)
 library(base64enc)
 
-# Source shared logging configuration
-source("functions/logging_config.R")
+# All required functions are sourced at startup in plumber.R
 
 # Main function to fetch Wikipedia main image for a taxonomic group
 get_wikipedia_main_image <- function(taxonomic_group, target_width = 800) {

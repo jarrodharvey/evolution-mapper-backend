@@ -188,11 +188,11 @@ get_legend_phylopic <- function() {
 
   tryCatch({
     # Source required functions
-    source("functions/phylopic_silhouettes.R", local = TRUE)
+    # All required functions are already sourced at startup
 
     # Try to load cached functions for better performance
     if (file.exists("functions/cached_api_functions.R")) {
-      source("functions/cached_api_functions.R", local = TRUE)
+      # Cached functions are already sourced at startup
       use_cached <- exists("cached_get_random_silhouette_uuid", mode = "function")
     } else {
       use_cached <- FALSE
