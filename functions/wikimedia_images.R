@@ -6,8 +6,7 @@ library(tidywikidatar)
 library(httr2)
 library(dplyr)
 
-# Source shared logging configuration
-source("functions/logging_config.R")
+# All required functions are sourced at startup in plumber.R
 
 # Main function to get Wikipedia/Wikimedia image for a taxonomic group
 get_wikimedia_image <- function(taxonomic_name, target_width = 200, max_images = 5) {

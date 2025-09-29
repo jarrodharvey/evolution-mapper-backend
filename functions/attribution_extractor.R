@@ -1,7 +1,7 @@
 # Attribution data extraction from cache files
 # Extracts all phylopic and wikipedia/wikimedia attributions from cached RDS files
 
-source("functions/logging_config.R")
+# All required functions are sourced at startup in plumber.R
 
 # Extract all attribution data from cache files
 get_all_attributions <- function() {

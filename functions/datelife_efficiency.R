@@ -3,7 +3,7 @@
 
 library(RSQLite)
 library(DBI)
-source("functions/logging_config.R")
+# All required functions are sourced at startup in plumber.R
 
 #' Get species from database with DateLife availability information
 #' @param common_names Vector of common names provided by user

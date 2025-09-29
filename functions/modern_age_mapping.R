@@ -7,8 +7,7 @@ library(ape)
 library(datelife)
 library(dplyr)
 
-# Source shared logging configuration
-source("functions/logging_config.R")
+# All required functions are sourced at startup in plumber.R
 
 #' Extract pairwise ages from DateLife chronograms
 #' @param datelife_results List of chronogram matrices from get_datelife_result()
