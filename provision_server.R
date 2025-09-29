@@ -42,21 +42,28 @@ prov_log_success <- function(...) {
 # Configuration
 REQUIRED_FILES <- c(
   "plumber.R",
-  "functions/rotl_tree_generation.R",
-  "functions/datelife_tree_generation.R",
-  "functions/hybrid_tree_generation.R",
   "functions/logging_config.R",
   "functions/caching_config.R",
-  "functions/color_config.R",
   "functions/parallel_config.R",
   "functions/progress_tracking.R",
   "functions/wikipedia_api.R",
-  "functions/info_panel_system.R",
   "functions/phylopic_silhouettes.R",
-  "functions/attribution_extractor.R",
-  "functions/cached_api_functions.R",
-  "functions/wikimedia_images.R",
   "functions/wikipedia_images.R",
+  "functions/wikimedia_images.R",
+  "functions/cached_api_functions.R",
+  "functions/color_config.R",
+  "functions/datelife_efficiency.R",
+  "functions/modern_age_mapping.R",
+  "functions/info_panel_system.R",
+  "functions/tree_html_enhancement.R",
+  "functions/rotl_tree_generation.R",
+  "functions/datelife_tree_generation.R",
+  "functions/hybrid_input_validation.R",
+  "functions/hybrid_tree_conversion.R",
+  "functions/hybrid_json_output.R",
+  "functions/hybrid_visualization.R",
+  "functions/hybrid_tree_controller.R",
+  "functions/attribution_extractor.R",
   "data/species.sqlite"
 )
 FIREWALL_NAME <- "evolution-mapper-restricted"
@@ -731,9 +738,9 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
       # CRAN packages (excluding memory-intensive ones that are installed as Ubuntu binaries)
       cran_packages <- c(
         "plumber", "rlang", "rotl", "ape", "collapsibleTree", "htmlwidgets",
-        "dplyr", "colorspace", "jsonlite", "httr", "httr2",
-        "logger", "memoise", "cachem", "future", "promises", "remotes",
-        "Hmisc", "taxize", "rphylopic", "phylobase", "tidywikidatar", "RSQLite", "DBI"
+        "RSQLite", "DBI", "dplyr", "httr", "httr2", "logger", "memoise",
+        "cachem", "future", "promises", "remotes", "Hmisc", "taxize",
+        "rphylopic", "phylobase", "jsonlite", "colorspace", "tidywikidatar"
       )
     
     for (pkg in cran_packages) {

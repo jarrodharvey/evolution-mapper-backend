@@ -60,6 +60,7 @@ Returns hybrid tree combining ROTL topology (complete coverage) with DateLife ag
 **Optional Parameters:**
 - `expansion_speed`: Animation speed for tree expansion (default: 1000ms)
 - `allow_partial_response`: Allow tree generation with subset of species (default: false)
+- `as_json`: Return structured JSON data instead of HTML visualization (default: false)
 
 ### Generate Dated Phylogenetic Tree
 ```
@@ -151,7 +152,11 @@ backend/
 ├── functions/
 │   ├── rotl_tree_generation.R       # Topology-only trees (Open Tree of Life)
 │   ├── datelife_tree_generation.R   # Dated trees (DateLife chronograms)
-│   ├── hybrid_tree_generation.R     # Hybrid trees (ROTL + DateLife)
+│   ├── hybrid_tree_controller.R     # Main hybrid tree endpoint controller
+│   ├── hybrid_tree_conversion.R     # Tree format conversion utilities
+│   ├── hybrid_input_validation.R    # Input validation for hybrid trees
+│   ├── hybrid_json_output.R         # JSON output format generation
+│   ├── hybrid_visualization.R       # Hybrid tree visualization logic
 │   ├── info_panel_system.R          # Mobile-friendly info panels
 │   ├── tree_html_enhancement.R      # Advanced tree visualization
 │   ├── wikipedia_api.R              # Wikipedia integration
@@ -166,7 +171,8 @@ backend/
 │   ├── parallel_config.R            # Parallel processing configuration
 │   ├── caching_config.R             # Multi-tier caching system
 │   ├── datelife_efficiency.R       # DateLife optimization utilities
-│   └── modern_age_mapping.R         # Age data mapping system
+│   ├── modern_age_mapping.R         # Age data mapping system
+│   └── show_function_relationships.R # Development utility for function analysis
 ├── data/
 │   └── species.sqlite               # Species database (90k+ records)
 ├── cache/                           # Multi-tier cache storage
@@ -325,6 +331,12 @@ curl -H "X-API-Key: demo-key-12345" "http://localhost:8000/api/legend"
 
 # Generate topology tree (paired names required)
 curl -X POST -H "X-API-Key: demo-key-12345" -d "common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis catus" http://localhost:8000/api/tree
+
+# Generate hybrid tree (RECOMMENDED - complete coverage + ages where available)
+curl -X POST -H "X-API-Key: demo-key-12345" -d "common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis catus" http://localhost:8000/api/full-tree-dated
+
+# Generate hybrid tree with JSON output
+curl -X POST -H "X-API-Key: demo-key-12345" -d "common_names=Human,Dog,Cat&scientific_names=Homo sapiens,Canis lupus,Felis catus&as_json=true" http://localhost:8000/api/full-tree-dated
 
 # Generate dated tree (paired names required)
 curl -X POST -H "X-API-Key: demo-key-12345" -d "common_names=Human,Dog&scientific_names=Homo sapiens,Canis lupus" http://localhost:8000/api/dated-tree
