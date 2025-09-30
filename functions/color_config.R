@@ -95,8 +95,9 @@ get_gradient_color <- function(node_type, age_scale) {
 
 #' Get legend data based on tree type (no_dates, all_dates, or mixed)
 #' @param type The type of legend to generate
+#' @param include_common_ancestor Whether to include common ancestor in legend (default TRUE)
 #' @return List of legend entries with color information
-get_legend_data <- function(type = "mixed") {
+get_legend_data <- function(type = "mixed", include_common_ancestor = TRUE) {
   # Base legend items (always included)
   legend_items <- list()
 
@@ -110,15 +111,17 @@ get_legend_data <- function(type = "mixed") {
     shape = "circle"
   )
 
-  # Common ancestor - always included
-  legend_items[["common_ancestor"]] <- list(
-    node_type = "root",
-    label = "Common Ancestor",
-    color = TREE_COLORS$root$hex,
-    color_name = TREE_COLORS$root$name,
-    description = TREE_COLORS$root$description,
-    shape = "circle"
-  )
+  # Common ancestor - conditionally included
+  if (include_common_ancestor) {
+    legend_items[["common_ancestor"]] <- list(
+      node_type = "root",
+      label = "Common Ancestor",
+      color = TREE_COLORS$root$hex,
+      color_name = TREE_COLORS$root$name,
+      description = TREE_COLORS$root$description,
+      shape = "circle"
+    )
+  }
 
   # Unnamed ancestor circle - always included
   legend_items[["ancestor_circle"]] <- list(

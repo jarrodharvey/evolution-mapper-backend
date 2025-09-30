@@ -226,8 +226,9 @@ function() {
 
 #* Get legend information for tree visualization colors
 #* @param type:[character] Legend type - "no_dates", "all_dates", or "mixed" (default: "mixed")
+#* @param include_common_ancestor:[logical] Whether to include common ancestor in legend (default: TRUE)
 #* @get /api/legend
-function(type = "mixed") {
+function(type = "mixed", include_common_ancestor = TRUE) {
   source("functions/color_config.R")
 
   # Validate type parameter
@@ -236,10 +237,20 @@ function(type = "mixed") {
     type <- "mixed"  # Default fallback
   }
 
+  # Parse include_common_ancestor parameter
+  include_ancestor <- TRUE
+  if (!is.null(include_common_ancestor)) {
+    if (is.logical(include_common_ancestor)) {
+      include_ancestor <- include_common_ancestor
+    } else if (is.character(include_common_ancestor)) {
+      include_ancestor <- tolower(include_common_ancestor) %in% c("true", "1", "yes")
+    }
+  }
+
   list(
     success = TRUE,
     type = type,
-    legend = get_legend_data(type)
+    legend = get_legend_data(type, include_common_ancestor = include_ancestor)
   )
 }
 
