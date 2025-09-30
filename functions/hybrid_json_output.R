@@ -426,6 +426,20 @@ convert_network_to_nested_json <- function(network_data, tree_data, request_id =
   # Build the complete tree
   tree_json <- build_tree_recursive(root_name)
 
+  # If as_json is TRUE and the root has children, return the children directly (skip root)
+  if (as_json && !is.null(tree_json$children) && length(tree_json$children) > 0) {
+    api_log_info(paste("[", request_id, "] Removing common ancestor root from JSON output"))
+
+    # If there's only one child, return it directly
+    if (length(tree_json$children) == 1) {
+      tree_json <- tree_json$children[[1]]
+    } else {
+      # If there are multiple children, we need to return an array
+      # This is unusual but we'll keep all children
+      tree_json <- tree_json$children
+    }
+  }
+
   api_log_info(paste("[", request_id, "] JSON tree structure created successfully"))
   return(tree_json)
 }
