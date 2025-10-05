@@ -50,6 +50,7 @@ REQUIRED_FILES <- c(
   "functions/phylopic_silhouettes.R",
   "functions/wikipedia_images.R",
   "functions/wikimedia_images.R",
+  "functions/ncbi_taxonomy_api.R",
   "functions/cached_api_functions.R",
   "functions/color_config.R",
   "functions/datelife_efficiency.R",
