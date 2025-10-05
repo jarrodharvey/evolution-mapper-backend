@@ -740,7 +740,8 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
         "plumber", "rlang", "rotl", "ape", "collapsibleTree", "htmlwidgets",
         "RSQLite", "DBI", "dplyr", "httr", "httr2", "logger", "memoise",
         "cachem", "future", "promises", "remotes", "Hmisc", "taxize",
-        "rphylopic", "phylobase", "jsonlite", "colorspace", "tidywikidatar"
+        "rphylopic", "phylobase", "jsonlite", "colorspace", "tidywikidatar",
+        "rentrez"
       )
     
     for (pkg in cran_packages) {

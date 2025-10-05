@@ -128,38 +128,54 @@ convert_to_readable_name <- function(name) {
     "Hominidae" = "Great apes"
   )
   
-  # Return readable name if available, otherwise clean up scientific name
+  # Return readable name if available, otherwise try NCBI, then clean up scientific name
   if (name %in% names(readable_names)) {
     return(readable_names[[name]])
-  } else {
-    # Clean up scientific names - remove OTT IDs, content in parentheses and brackets, capitalize first letter, replace underscores
-    clean_name <- name
-    
-    # Handle Mrcaott patterns - these should never reach this function but just in case
-    if (grepl("^[Mm]rcaott\\d+ott\\d+", clean_name)) {
-      return(paste0("Internal node (", substr(clean_name, 1, 15), "...)"))
-    } 
-    
-    # Handle labels that are ONLY an OTT ID
-    if (grepl("^ott\\d+$", clean_name)) {
-      return(paste0("Taxonomic group (", clean_name, ")"))
-    } 
-    
-    # Clean up normal taxonomic names by removing OTT IDs
-    clean_name <- gsub("\\s*ott\\d+", "", clean_name)
-    clean_name <- gsub("\\s*\\([^)]*\\)", "", clean_name)  # Remove content in parentheses
-    clean_name <- gsub("\\s*\\[[^]]*\\]", "", clean_name)  # Remove content in brackets
-    clean_name <- gsub("_", " ", clean_name)
-    clean_name <- gsub("^([a-z])", "\\U\\1", clean_name, perl = TRUE)
-    clean_name <- trimws(clean_name)  # Remove any extra whitespace
-    
-    # If cleaning removed everything, return a fallback with original name for uniqueness
-    if (clean_name == "" || nchar(clean_name) == 0) {
-      return(paste0("Taxonomic group (", substr(name, 1, 10), "...)"))
-    }
-    
-    return(clean_name)
   }
+
+  # Try NCBI common name lookup for taxonomic groups
+  if (exists("cached_get_ncbi_common_name", mode = "function")) {
+    # Clean OTT IDs and taxonomic rank info before querying NCBI
+    clean_name_for_ncbi <- gsub("\\s*ott\\d+", "", name)
+    clean_name_for_ncbi <- gsub("\\s*\\([^)]*\\)", "", clean_name_for_ncbi)  # Remove parentheses (rank info)
+    clean_name_for_ncbi <- gsub("\\s*\\[[^]]*\\]", "", clean_name_for_ncbi)  # Remove brackets
+    clean_name_for_ncbi <- trimws(clean_name_for_ncbi)
+
+    ncbi_common_name <- cached_get_ncbi_common_name(clean_name_for_ncbi)
+    if (!is.null(ncbi_common_name)) {
+      api_log_info(paste("Using NCBI common name for", name, ":", ncbi_common_name))
+      return(ncbi_common_name)
+    }
+  }
+
+  # Fall back to cleanup logic if NCBI returns NULL or function doesn't exist
+  # Clean up scientific names - remove OTT IDs, content in parentheses and brackets, capitalize first letter, replace underscores
+  clean_name <- name
+
+  # Handle Mrcaott patterns - these should never reach this function but just in case
+  if (grepl("^[Mm]rcaott\\d+ott\\d+", clean_name)) {
+    return(paste0("Internal node (", substr(clean_name, 1, 15), "...)"))
+  }
+
+  # Handle labels that are ONLY an OTT ID
+  if (grepl("^ott\\d+$", clean_name)) {
+    return(paste0("Taxonomic group (", clean_name, ")"))
+  }
+
+  # Clean up normal taxonomic names by removing OTT IDs
+  clean_name <- gsub("\\s*ott\\d+", "", clean_name)
+  clean_name <- gsub("\\s*\\([^)]*\\)", "", clean_name)  # Remove content in parentheses
+  clean_name <- gsub("\\s*\\[[^]]*\\]", "", clean_name)  # Remove content in brackets
+  clean_name <- gsub("_", " ", clean_name)
+  clean_name <- gsub("^([a-z])", "\\U\\1", clean_name, perl = TRUE)
+  clean_name <- trimws(clean_name)  # Remove any extra whitespace
+
+  # If cleaning removed everything, return a fallback with original name for uniqueness
+  if (clean_name == "" || nchar(clean_name) == 0) {
+    return(paste0("Taxonomic group (", substr(name, 1, 10), "...)"))
+  }
+
+  return(clean_name)
 }
 
 # Function to trace path from tip to root (simplified - no age tracking)

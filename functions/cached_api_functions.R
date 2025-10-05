@@ -11,6 +11,7 @@ memoised_get_silhouette_data <- memoise(get_silhouette_data, cache = phylopic_ca
 memoised_get_random_silhouette_uuid <- memoise(get_random_silhouette_uuid, cache = phylopic_cache)
 memoised_get_wikipedia_main_image <- memoise(get_wikipedia_main_image, cache = wikipedia_images_cache)
 memoised_get_wikimedia_image_enhanced <- memoise(get_wikimedia_image_enhanced, cache = wikimedia_images_cache)
+memoised_get_ncbi_common_name <- memoise(get_ncbi_common_name, cache = ncbi_taxonomy_cache)
 
 # Wikipedia functions with cache hit/miss logging
 #
@@ -183,6 +184,34 @@ cached_get_wikimedia_image_enhanced <- function(taxonomic_group, target_width = 
   return(result)
 }
 
+# NCBI Taxonomy function with cache logging
+cached_get_ncbi_common_name <- function(taxonomic_name) {
+  cache_stats_before <- ncbi_taxonomy_cache$size()
+
+  api_log_info(paste("NCBI Taxonomy Cache lookup for", taxonomic_name))
+
+  # Ensure required functions are available in this context
+  tryCatch({
+    result <- memoised_get_ncbi_common_name(taxonomic_name)
+  }, error = function(e) {
+    # If memoised function fails due to missing dependencies, call original function directly
+    api_log_warn(paste("Memoised NCBI function failed, calling original:", e$message))
+    # All functions are already sourced at startup
+    result <- get_ncbi_common_name(taxonomic_name)
+    return(result)
+  })
+
+  cache_stats_after <- ncbi_taxonomy_cache$size()
+
+  if (cache_stats_after > cache_stats_before) {
+    api_log_info(paste("NCBI Taxonomy Cache MISS - fetched from API for", taxonomic_name))
+  } else {
+    api_log_info(paste("NCBI Taxonomy Cache HIT - using cached data for", taxonomic_name))
+  }
+
+  return(result)
+}
+
 
 # Note: Info panel generation functions are cached within info_panel_system.R
 # to avoid circular dependencies. The core API functions above provide the 
@@ -200,6 +229,7 @@ clear_all_caches <- function() {
   phylopic_cache$reset()
   wikipedia_images_cache$reset()
   wikimedia_images_cache$reset()
+  ncbi_taxonomy_cache$reset()
 
   api_log_info("All caches cleared successfully")
 }
@@ -226,6 +256,10 @@ get_cache_stats <- function() {
     wikimedia_images = list(
       size = wikimedia_images_cache$size(),
       keys = length(wikimedia_images_cache$keys())
+    ),
+    ncbi_taxonomy = list(
+      size = ncbi_taxonomy_cache$size(),
+      keys = length(ncbi_taxonomy_cache$keys())
     )
   )
 }

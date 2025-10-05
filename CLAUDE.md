@@ -13,7 +13,7 @@ pr("plumber.R") %>% pr_run(port = 8000)
 ### Install Dependencies
 ```r
 install.packages(c("plumber", "rlang", "rotl", "ape", "collapsibleTree",
-                   "htmlwidgets", "RSQLite", "DBI", "dplyr", "datelife", "httr", "logger"))
+                   "htmlwidgets", "RSQLite", "DBI", "dplyr", "datelife", "httr", "logger", "rentrez"))
 ```
 
 **System Dependencies (production):**

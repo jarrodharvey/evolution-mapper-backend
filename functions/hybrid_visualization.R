@@ -13,6 +13,7 @@ transform_hybrid_to_info_panel_format <- function(network_data) {
   info_panel_data <- data.frame(
     to = network_data$to,
     NodeType = network_data$NodeType,
+    TaxonomicName = network_data$TaxonomicName,  # Preserve original taxonomic name for Wikipedia/Wikimedia lookups
     stringsAsFactors = FALSE
   )
 
@@ -74,6 +75,7 @@ create_hybrid_tree_visualization <- function(network_data, request_id = NULL, pr
     Child = network_data$to,
     NodeType = network_data$NodeType,
     HasAge = network_data$HasAge,
+    TaxonomicName = network_data$TaxonomicName,
     stringsAsFactors = FALSE
   )
 

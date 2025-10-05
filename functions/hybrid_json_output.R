@@ -67,10 +67,15 @@ convert_network_to_nested_json <- function(network_data, tree_data, request_id =
     # Check for PhyloPic data from our dedicated collection first
     phylopic_found <- FALSE
     if (!is.null(phylopic_data)) {
-      # Extract taxonomic name for PhyloPic lookup
-      taxonomic_name <- gsub("\\s*\\([^)]*\\)\\s*", "", node_name)  # Remove age info
-      taxonomic_name <- gsub("^(Ancestor|Node)\\s+", "", taxonomic_name)  # Remove prefixes
-      taxonomic_name <- trimws(taxonomic_name)
+      # Use original taxonomic name from node_data for PhyloPic lookups (before NCBI transformation)
+      taxonomic_name <- if (!is.null(node_data$TaxonomicName) && !is.na(node_data$TaxonomicName) && nchar(node_data$TaxonomicName) > 0) {
+        node_data$TaxonomicName
+      } else {
+        # Fallback: Extract from node name if TaxonomicName not available
+        temp_name <- gsub("\\s*\\([^)]*\\)\\s*", "", node_name)  # Remove age info
+        temp_name <- gsub("^(Ancestor|Node)\\s+", "", temp_name)  # Remove prefixes
+        trimws(temp_name)
+      }
 
       # Look for PhyloPic data for this taxonomic name
       if (taxonomic_name %in% names(phylopic_data)) {
@@ -194,10 +199,15 @@ convert_network_to_nested_json <- function(network_data, tree_data, request_id =
       # This provides clean URLs rather than base64 data
       api_log_info(paste("[JSON] Node:", node_name, "| Type:", metadata$node_type, "| Image URL:", metadata$image_url))
       if (metadata$node_type == "taxonomic" && (is.na(metadata$image_url) || metadata$image_url == "" || is.null(metadata$image_url))) {
-        # Extract taxonomic name for image search
-        taxonomic_name <- gsub("\\s*\\([^)]*\\)\\s*", "", node_name)  # Remove age info
-        taxonomic_name <- gsub("^(Ancestor|Node)\\s+", "", taxonomic_name)  # Remove prefixes
-        taxonomic_name <- trimws(taxonomic_name)
+        # Use original taxonomic name from node_data for Wikipedia lookups (before NCBI transformation)
+        taxonomic_name <- if (!is.null(node_data$TaxonomicName) && !is.na(node_data$TaxonomicName) && nchar(node_data$TaxonomicName) > 0) {
+          node_data$TaxonomicName
+        } else {
+          # Fallback: Extract from node name if TaxonomicName not available
+          temp_name <- gsub("\\s*\\([^)]*\\)\\s*", "", node_name)  # Remove age info
+          temp_name <- gsub("^(Ancestor|Node)\\s+", "", temp_name)  # Remove prefixes
+          trimws(temp_name)
+        }
 
         api_log_info(paste("[JSON] Attempting Wikimedia image fetch for taxonomic node:", taxonomic_name))
 

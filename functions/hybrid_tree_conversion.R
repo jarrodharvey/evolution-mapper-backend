@@ -207,6 +207,7 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
     NodeType = character(0),
     AgeInfo = character(0),  # Age information or "age unavailable"
     HasAge = logical(0),     # TRUE if age data is available
+    TaxonomicName = character(0),  # Original taxonomic/scientific name for Wikipedia lookups
     stringsAsFactors = FALSE
   )
 
@@ -562,6 +563,35 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
     }
   }
 
+  # Helper function to get original taxonomic name (before NCBI transformation) for Wikipedia lookups
+  get_taxonomic_name <- function(node_num, node_type) {
+    if (node_num <= n_tips) {
+      # For tips, extract scientific name from tip label
+      tip_label <- phylo_tree$tip.label[node_num]
+      tip_clean <- gsub("_ott\\d+", "", tip_label)
+      tip_clean <- gsub("_", " ", tip_clean)
+      return(tip_clean)
+    } else {
+      # For internal nodes, return the original node label (before NCBI transformation)
+      internal_index <- node_num - n_tips
+      if (!is.null(phylo_tree$node.label) &&
+          length(phylo_tree$node.label) >= internal_index &&
+          !is.na(phylo_tree$node.label[internal_index]) &&
+          nchar(trimws(phylo_tree$node.label[internal_index])) > 0 &&
+          !grepl("^[Mm]rcaott\\d+ott\\d+", phylo_tree$node.label[internal_index])) {
+        # Return original taxonomic name, cleaned of OTT IDs and rank information
+        original_name <- phylo_tree$node.label[internal_index]
+        original_name <- gsub("\\s*ott\\d+", "", original_name)
+        original_name <- gsub("\\s*\\([^)]*\\)", "", original_name)  # Remove rank info like "(superclass in phylum Chordata)"
+        original_name <- gsub("\\s*\\[[^]]*\\]", "", original_name)  # Remove bracket content
+        original_name <- trimws(original_name)
+        return(original_name)
+      } else {
+        return(NA_character_)
+      }
+    }
+  }
+
   # First pass: collect all unique parent and child nodes with their age information
   # This ensures that parent nodes (including root) get their age data processed
   all_parent_nums <- unique(phylo_tree$edge[, 1])
@@ -617,6 +647,9 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
     child_label <- node_label_cache[[as.character(child_num)]]
     child_age_result <- node_age_cache[[as.character(child_num)]]
 
+    # Get taxonomic name for Wikipedia lookups (original name before NCBI transformation)
+    child_taxonomic_name <- get_taxonomic_name(child_num, child_type)
+
     # Add edge to network
     network_data <- rbind(network_data, data.frame(
       from = parent_label,
@@ -624,6 +657,7 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
       NodeType = child_type,
       AgeInfo = child_age_result$info,
       HasAge = child_age_result$has_age,
+      TaxonomicName = child_taxonomic_name,
       stringsAsFactors = FALSE
     ))
   }
@@ -714,12 +748,16 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
           has_age <- FALSE
         }
 
+        # Get taxonomic name for orphaned parent
+        orphan_taxonomic_name <- get_taxonomic_name(orphaned_parent_node_num, node_type)
+
         network_data <- rbind(data.frame(
           from = root_display_name,
           to = orphaned_parent,
           NodeType = node_type,
           AgeInfo = age_info,
           HasAge = has_age,
+          TaxonomicName = orphan_taxonomic_name,
           stringsAsFactors = FALSE
         ), network_data)
       }
@@ -732,6 +770,7 @@ convert_phylo_to_network_hybrid <- function(phylo_tree, species_data, datelife_s
       NodeType = "root",
       AgeInfo = root_age_info,
       HasAge = root_has_age,
+      TaxonomicName = NA_character_,  # Root node has no taxonomic name
       stringsAsFactors = FALSE
     ), network_data)
   }

@@ -304,15 +304,29 @@ create_phylopic_node_replacement_data <- function(network_data, request_id = NUL
     
     # Check if this is a taxonomic node (not species, not generic ancestor)
     if ("NodeType" %in% names(node_info) && node_info$NodeType == "taxonomic") {
-      # Extract taxonomic name
-      taxonomic_name <- extract_taxonomic_name(node_info)
-      
-      if (!is.null(taxonomic_name) && nchar(trimws(taxonomic_name)) > 2) {
+      # Get the scientific name for PhyloPic lookup (original taxonomic name)
+      scientific_name <- extract_taxonomic_name(node_info)
+
+      # Get the display name for JavaScript key (common name from NCBI or fallback)
+      # This is what appears in the tree and what JavaScript will use to look up the data
+      display_name <- if ("to" %in% names(node_info)) {
+        node_info$to
+      } else if ("Child" %in% names(node_info)) {
+        node_info$Child
+      } else {
+        scientific_name  # Fallback to scientific name if no display name field
+      }
+
+      # Strip age info from display name to match JavaScript extraction
+      display_name <- sub("\\s*\\(~?[0-9]+\\.?[0-9]*\\s+Mya\\).*$", "", display_name)
+      display_name <- trimws(display_name)
+
+      if (!is.null(scientific_name) && nchar(trimws(scientific_name)) > 2) {
         # Skip generic ancestor names
-        if (!grepl("^(Ancestor|Node)\\.+[A-Z]$", taxonomic_name) && 
-            !grepl("^Common ancestor", taxonomic_name)) {
-          
-          api_log_info(paste("[", request_id, "] Fetching PhyloPic for taxonomic node:", taxonomic_name))
+        if (!grepl("^(Ancestor|Node)\\.+[A-Z]$", scientific_name) &&
+            !grepl("^Common ancestor", scientific_name)) {
+
+          api_log_info(paste("[", request_id, "] Fetching PhyloPic for taxonomic node:", display_name, "(scientific:", scientific_name, ")"))
           
           # Extract age information for color gradient
           age_value <- NULL
@@ -333,16 +347,17 @@ create_phylopic_node_replacement_data <- function(network_data, request_id = NUL
             age_value <- NULL
           }
           
-          # Get PhyloPic data optimized for node replacement (color inheritance will happen on frontend)
+          # Get PhyloPic data using scientific name for lookup (better chance of finding silhouettes)
           phylopic_result <- get_silhouette_for_node_replacement(
-            taxonomic_name,
+            scientific_name,  # Use scientific name for PhyloPic API lookup
             target_size = 35,
             use_cache = use_cache,
             inherited_color = NULL  # Color inheritance happens on frontend
           )
-          
+
           if (phylopic_result$success) {
-            taxonomic_nodes[[taxonomic_name]] <- list(
+            # Key by display name (what JavaScript will use for lookup)
+            taxonomic_nodes[[display_name]] <- list(
               data_url = phylopic_result$data_url,
               uuid = phylopic_result$uuid,
               attribution = phylopic_result$attribution,
@@ -353,9 +368,9 @@ create_phylopic_node_replacement_data <- function(network_data, request_id = NUL
               age_value = age_value,
               has_age_data = has_age_data
             )
-            api_log_info(paste("[", request_id, "] PhyloPic success for:", taxonomic_name))
+            api_log_info(paste("[", request_id, "] PhyloPic success for:", display_name, "(looked up as:", scientific_name, ")"))
           } else {
-            api_log_info(paste("[", request_id, "] PhyloPic failed for:", taxonomic_name, "-", phylopic_result$error))
+            api_log_info(paste("[", request_id, "] PhyloPic failed for:", scientific_name, "-", phylopic_result$error))
             # Don't add failed ones to the mapping - they'll fall back to orange circles
           }
         }

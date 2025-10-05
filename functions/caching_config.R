@@ -43,11 +43,19 @@ wikimedia_images_cache <- cache_disk(
   max_age = 60 * 24 * 60 * 60  # 60 days (Wikimedia content very stable)
 )
 
+# NCBI Taxonomy cache - separate cache for NCBI Taxonomy API calls
+ncbi_taxonomy_cache <- cache_disk(
+  dir = "cache/ncbi_taxonomy/",
+  max_size = 100 * 1024^2,  # 100MB (text data only)
+  max_age = 90 * 24 * 60 * 60  # 90 days (taxonomic names very stable)
+)
+
 
 api_log_info("Caching configuration loaded successfully")
 api_log_info(paste("Cache directories:"))
 api_log_info(paste("  Info panels:", file.path(getwd(), "cache/info_panels/")))
 api_log_info(paste("  Wikipedia:", file.path(getwd(), "cache/wikipedia/")))
 api_log_info(paste("  PhyloPic:", file.path(getwd(), "cache/phylopic/")))
+api_log_info(paste("  NCBI Taxonomy:", file.path(getwd(), "cache/ncbi_taxonomy/")))
 api_log_info(paste("  Wikipedia Images:", file.path(getwd(), "cache/wikipedia_images/")))
 api_log_info(paste("  Wikimedia Images:", file.path(getwd(), "cache/wikimedia_images/")))

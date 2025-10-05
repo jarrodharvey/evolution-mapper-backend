@@ -1019,14 +1019,14 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
   if (is.null(request_id)) {
     request_id <- "info_panel"
   }
-  
+
   # Helper function to update progress if token provided
   update_progress_internal <- function(step_name, status = "completed", additional_data = NULL) {
     if (!is.null(progress_token) && progress_token != "") {
       update_progress(progress_token, step_name, status, additional_data)
     }
   }
-  
+
   # Configure logging for future worker process - write to same log file as main process
   if (exists("log_appender", mode = "function")) {
     # Ensure logs directory exists in worker
@@ -1038,7 +1038,7 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
     log_layout(layout_simple, namespace = "evolution.api")
     log_threshold(INFO, namespace = "evolution.api")
   }
-  
+
   api_log_info(paste("[", request_id, "] Starting sequential info panel data creation...", sep=""))
   start_time <- Sys.time()
   
@@ -1108,7 +1108,7 @@ create_info_panel_data_sequential <- function(network_data, request_id = NULL, p
       
       # Extract taxonomic name
       taxonomic_name <- extract_taxonomic_name(node_info)
-      
+
       # Skip if it's a generic ancestor name
       # Add comprehensive null and length checks to prevent "argument is of length zero" error
       if (is.null(taxonomic_name) || 
@@ -1487,6 +1487,20 @@ create_info_panel_data_parallel <- function(network_data, request_id = NULL) {
 
 # Helper function to extract taxonomic name from node info
 extract_taxonomic_name <- function(node_info) {
+  # First, check if TaxonomicName field is available (preserves original scientific name before NCBI transformation)
+  if ("TaxonomicName" %in% names(node_info)) {
+    taxonomic_name <- node_info$TaxonomicName
+
+    # Validate TaxonomicName is not NULL, NA, or empty
+    if (!is.null(taxonomic_name) &&
+        length(taxonomic_name) > 0 &&
+        !is.na(taxonomic_name) &&
+        nchar(trimws(as.character(taxonomic_name))) > 0) {
+      return(as.character(taxonomic_name))
+    }
+  }
+
+  # Fallback: Extract from node label (to/Child/Name fields)
   if ("to" %in% names(node_info)) {
     raw_name <- node_info$to
   } else if ("Child" %in% names(node_info)) {
@@ -1496,15 +1510,15 @@ extract_taxonomic_name <- function(node_info) {
   } else {
     return(NULL)
   }
-  
+
   # Check if raw_name is NULL, NA, or empty
   if (is.null(raw_name) || length(raw_name) == 0 || is.na(raw_name) || nchar(trimws(as.character(raw_name))) == 0) {
     return(NULL)
   }
-  
+
   # Convert to character to ensure we have a proper string
   raw_name <- as.character(raw_name)
-  
+
   # Extract taxonomic name from hybrid nodes like "Spermatophyta (352.2 Mya)" or "Boreoeutheria (99.3 Mya)" or "Clupeocephala (~532.4 Mya)"
   if (grepl("\\s*\\(~?[0-9]+\\.?[0-9]*\\s+Mya\\)", raw_name)) {
     # Extract just the taxonomic part before the age in parentheses (handles optional tilde)
@@ -1517,12 +1531,12 @@ extract_taxonomic_name <- function(node_info) {
   } else {
     taxonomic_name <- raw_name
   }
-  
+
   # Final check to ensure we return NULL instead of empty string
   if (is.null(taxonomic_name) || length(taxonomic_name) == 0 || is.na(taxonomic_name) || nchar(trimws(taxonomic_name)) == 0) {
     return(NULL)
   }
-  
+
   return(taxonomic_name)
 }
 
