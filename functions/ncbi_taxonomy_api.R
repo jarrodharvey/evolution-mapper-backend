@@ -3,6 +3,7 @@
 # Uses the rentrez package to query NCBI's taxonomy database
 
 library(rentrez)
+library(pluralize)
 
 # All required functions are sourced at startup in plumber.R
 
@@ -67,8 +68,11 @@ get_ncbi_common_name <- function(taxonomic_name) {
       return(NULL)
     }
 
+    # Singularize the common name since taxonomic nodes represent a single ancestor
+    singularized_name <- singularize(selected_common_name)
+
     # Convert to proper case (capitalize first letter)
-    common_name <- paste0(toupper(substring(selected_common_name, 1, 1)), substring(selected_common_name, 2))
+    common_name <- paste0(toupper(substring(singularized_name, 1, 1)), substring(singularized_name, 2))
 
     return(common_name)
 
