@@ -685,7 +685,7 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
 
     # Check if we can skip package installation by verifying key packages exist
     prov_log_info("Checking existing R package installation...")
-    key_packages <- c("plumber", "datelife", "bold", "rphylopic", "tidywikidatar", "RSQLite")
+    key_packages <- c("plumber", "datelife", "bold", "rphylopic", "tidywikidatar", "RSQLite", "pluralize")
     all_packages_exist <- TRUE
 
     tryCatch({
@@ -744,6 +744,11 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
         "rphylopic", "phylobase", "jsonlite", "colorspace", "tidywikidatar",
         "rentrez"
       )
+
+      # GitHub packages that need to be installed via remotes
+      github_cran_packages <- list(
+        list(name = "pluralize", repo = "hrbrmstr/pluralize")
+      )
     
     for (pkg in cran_packages) {
       # Check if package is already installed system-wide
@@ -783,7 +788,45 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
         stop("❌ Failed to install R package '", pkg, "' system-wide: ", e$message)
       })
     }
-    
+
+    # Install GitHub-based CRAN packages (packages available on GitHub)
+    prov_log_info("Installing GitHub-based packages system-wide...")
+    for (pkg_info in github_cran_packages) {
+      # Check if GitHub package is already installed system-wide
+      prov_log_info("Checking if GitHub package already installed system-wide:", pkg_info$name)
+      check_result <- tryCatch({
+        result <- capture.output(droplet_ssh(droplet, paste0(
+          'R -e "if (require(', pkg_info$name, ', lib.loc=\'/usr/local/lib/R/site-library\', quietly=TRUE)) { cat(\'ALREADY_INSTALLED\') } else { cat(\'NOT_INSTALLED\') }"'
+        )))
+        paste(result, collapse = " ")
+      }, error = function(e) {
+        "NOT_INSTALLED"
+      })
+
+      if (grepl("ALREADY_INSTALLED", check_result)) {
+        prov_log_info("GitHub package already installed, skipping:", pkg_info$name)
+        next
+      }
+
+      prov_log_info("Installing GitHub package system-wide:", pkg_info$name, "from", pkg_info$repo)
+
+      github_install_result <- capture.output(droplet_ssh(droplet, paste0(
+        'sudo R -e "library(remotes, lib.loc=\'/usr/local/lib/R/site-library\'); ',
+        'install_github(\'', pkg_info$repo, '\', lib=\'/usr/local/lib/R/site-library\', quiet=FALSE); ',
+        'if (require(', pkg_info$name, ', lib.loc=\'/usr/local/lib/R/site-library\', quietly=TRUE)) { cat(\'VERIFY_SUCCESS\') } else { cat(\'VERIFY_FAILED\') }"'
+      )))
+      github_install_result <- paste(github_install_result, collapse = " ")
+
+      if (grepl("VERIFY_FAILED", github_install_result) || !grepl("VERIFY_SUCCESS", github_install_result)) {
+        prov_log_error("GitHub package installation verification failed for:", pkg_info$name)
+        prov_log_error("Installation output:", github_install_result)
+        stop("GitHub package installation verification failed for: ", pkg_info$name)
+      }
+
+      prov_log_success("Successfully installed system-wide:", pkg_info$name)
+    }
+    prov_log_success("All GitHub-based packages installed system-wide successfully")
+
     # GitHub packages (removed from CRAN) - install system-wide
     prov_log_info("Installing packages from GitHub system-wide...")
     prov_log_info("⏳ NOTE: GitHub package installation may take 15-30 minutes due to complex dependencies (especially datelife with Bioconductor packages). Please be patient...")
