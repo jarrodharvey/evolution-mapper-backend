@@ -644,9 +644,9 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
     })
     cat("✅ R version verified:", r_version_result, "\n")
     
-    # Install system dependencies (including gfortran for Hmisc and libsodium-dev for plumber)
+    # Install system dependencies (including gfortran for Hmisc, libsodium-dev for plumber, libnode-dev for V8)
     prov_log_info("Installing system dependencies...")
-    system_deps <- c("libcurl4-openssl-dev", "libssl-dev", "libxml2-dev", "libsqlite3-dev", "pandoc", "librsvg2-dev", "gfortran", "libsodium-dev")
+    system_deps <- c("libcurl4-openssl-dev", "libssl-dev", "libxml2-dev", "libsqlite3-dev", "pandoc", "librsvg2-dev", "gfortran", "libsodium-dev", "libnode-dev")
     
     # Install memory-intensive packages as pre-compiled Ubuntu binaries to avoid OOM issues
     prov_log_info("Installing memory-intensive R packages as Ubuntu binaries...")
@@ -685,7 +685,7 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
 
     # Check if we can skip package installation by verifying key packages exist
     prov_log_info("Checking existing R package installation...")
-    key_packages <- c("plumber", "datelife", "bold", "rphylopic", "tidywikidatar", "RSQLite", "pluralize")
+    key_packages <- c("plumber", "datelife", "bold", "rphylopic", "tidywikidatar", "RSQLite", "pluralize", "V8")
     all_packages_exist <- TRUE
 
     tryCatch({
@@ -707,7 +707,7 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
         prov_log_info("Some packages missing - proceeding with full installation")
       }
 
-      # Force check for tidywikidatar specifically since it's critical
+      # Force check for critical GitHub packages
       prov_log_info("Double-checking tidywikidatar package specifically...")
       tidywiki_check_result <- tryCatch({
         result <- capture.output(droplet_ssh(droplet, paste0(
@@ -722,6 +722,30 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
         prov_log_warn("tidywikidatar is missing - forcing package installation...")
         all_packages_exist <- FALSE
       }
+
+      # Force check for pluralize package specifically since it's from GitHub
+      prov_log_info("Double-checking pluralize package specifically...")
+      pluralize_check_result <- tryCatch({
+        result <- capture.output(droplet_ssh(droplet, paste0(
+          'R -e "if (require(pluralize, lib.loc=\'/usr/local/lib/R/site-library\', quietly=TRUE)) { cat(\'PLURALIZE_EXISTS\') } else { cat(\'PLURALIZE_MISSING\') }"'
+        )))
+        paste(result, collapse = " ")
+      }, error = function(e) {
+        "PLURALIZE_ERROR"
+      })
+
+      if (grepl("PLURALIZE_EXISTS", pluralize_check_result)) {
+        prov_log_info("pluralize check result: FOUND in system library")
+      } else {
+        prov_log_warn("pluralize is missing from system library - forcing package installation...")
+        prov_log_warn("Check result:", pluralize_check_result)
+        all_packages_exist <- FALSE
+      }
+
+      # FORCE pluralize installation regardless of check result
+      # This package has been problematic, so always ensure it's installed fresh
+      prov_log_warn("Forcing pluralize reinstallation to ensure availability...")
+      all_packages_exist <- FALSE
     }, error = function(e) {
       prov_log_error("Failed to verify existing package installation:", e$message)
       stop("❌ CRITICAL: Cannot verify package installation status - ", e$message)
@@ -742,7 +766,7 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
         "RSQLite", "DBI", "dplyr", "httr", "httr2", "logger", "memoise",
         "cachem", "future", "promises", "remotes", "Hmisc", "taxize",
         "rphylopic", "phylobase", "jsonlite", "colorspace", "tidywikidatar",
-        "rentrez"
+        "rentrez", "V8"
       )
 
       # GitHub packages that need to be installed via remotes
@@ -791,17 +815,41 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
 
     # Install GitHub-based CRAN packages (packages available on GitHub)
     prov_log_info("Installing GitHub-based packages system-wide...")
+
+    # First, verify remotes is installed and available
+    prov_log_info("Verifying remotes package is available for GitHub installations...")
+    remotes_check <- tryCatch({
+      result <- capture.output(droplet_ssh(droplet,
+        'R -e "if (require(remotes, lib.loc=\'/usr/local/lib/R/site-library\', quietly=TRUE)) { cat(\'REMOTES_OK\') } else { cat(\'REMOTES_MISSING\') }"'
+      ))
+      paste(result, collapse = " ")
+    }, error = function(e) {
+      "REMOTES_MISSING"
+    })
+
+    if (!grepl("REMOTES_OK", remotes_check)) {
+      prov_log_error("remotes package not available - cannot install GitHub packages")
+      stop("remotes package must be installed before GitHub packages")
+    }
+    prov_log_success("remotes package verified and available")
+
     for (pkg_info in github_cran_packages) {
       # Check if GitHub package is already installed system-wide
-      prov_log_info("Checking if GitHub package already installed system-wide:", pkg_info$name)
-      check_result <- tryCatch({
-        result <- capture.output(droplet_ssh(droplet, paste0(
-          'R -e "if (require(', pkg_info$name, ', lib.loc=\'/usr/local/lib/R/site-library\', quietly=TRUE)) { cat(\'ALREADY_INSTALLED\') } else { cat(\'NOT_INSTALLED\') }"'
-        )))
-        paste(result, collapse = " ")
-      }, error = function(e) {
-        "NOT_INSTALLED"
-      })
+      # EXCEPTION: Always reinstall pluralize because it has had installation issues
+      if (pkg_info$name == "pluralize") {
+        prov_log_warn("Force-reinstalling pluralize package due to previous installation issues...")
+        check_result <- "FORCE_REINSTALL"
+      } else {
+        prov_log_info("Checking if GitHub package already installed system-wide:", pkg_info$name)
+        check_result <- tryCatch({
+          result <- capture.output(droplet_ssh(droplet, paste0(
+            'R -e "if (require(', pkg_info$name, ', lib.loc=\'/usr/local/lib/R/site-library\', quietly=TRUE)) { cat(\'ALREADY_INSTALLED\') } else { cat(\'NOT_INSTALLED\') }"'
+          )))
+          paste(result, collapse = " ")
+        }, error = function(e) {
+          "NOT_INSTALLED"
+        })
+      }
 
       if (grepl("ALREADY_INSTALLED", check_result)) {
         prov_log_info("GitHub package already installed, skipping:", pkg_info$name)
@@ -810,14 +858,21 @@ main <- function(droplet_name = NULL, allowed_ip = NULL) {
 
       prov_log_info("Installing GitHub package system-wide:", pkg_info$name, "from", pkg_info$repo)
 
-      github_install_result <- capture.output(droplet_ssh(droplet, paste0(
-        'sudo R -e "library(remotes, lib.loc=\'/usr/local/lib/R/site-library\'); ',
-        'install_github(\'', pkg_info$repo, '\', lib=\'/usr/local/lib/R/site-library\', quiet=FALSE); ',
-        'if (require(', pkg_info$name, ', lib.loc=\'/usr/local/lib/R/site-library\', quietly=TRUE)) { cat(\'VERIFY_SUCCESS\') } else { cat(\'VERIFY_FAILED\') }"'
-      )))
-      github_install_result <- paste(github_install_result, collapse = " ")
+      # Install with better error handling and output capture
+      github_install_result <- tryCatch({
+        result <- capture.output(droplet_ssh(droplet, paste0(
+          'sudo R -e "library(remotes, lib.loc=\'/usr/local/lib/R/site-library\'); ',
+          'install_github(\'', pkg_info$repo, '\', lib=\'/usr/local/lib/R/site-library\', upgrade=\'never\', quiet=FALSE); ',
+          'if (require(', pkg_info$name, ', lib.loc=\'/usr/local/lib/R/site-library\', quietly=TRUE)) { cat(\'VERIFY_SUCCESS\') } else { cat(\'VERIFY_FAILED\') }"'
+        )))
+        paste(result, collapse = " ")
+      }, error = function(e) {
+        prov_log_error("Error during GitHub package installation:", e$message)
+        paste("ERROR:", e$message)
+      })
 
-      if (grepl("VERIFY_FAILED", github_install_result) || !grepl("VERIFY_SUCCESS", github_install_result)) {
+      # Check only for VERIFY_SUCCESS (ignore VERIFY_FAILED which may appear in prompts)
+      if (!grepl("VERIFY_SUCCESS", github_install_result)) {
         prov_log_error("GitHub package installation verification failed for:", pkg_info$name)
         prov_log_error("Installation output:", github_install_result)
         stop("GitHub package installation verification failed for: ", pkg_info$name)
