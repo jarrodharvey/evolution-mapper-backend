@@ -322,66 +322,50 @@ setup_reverse_proxy <- function(droplet, domain) {
     stop("❌ CRITICAL: Caddy configuration failed - ", e$message)
   })
   
-  # Start Caddy service (not restart, since it may not be running)
-  prov_log_info("Starting Caddy service...")
+  # Start and enable Caddy service (not restart, since it may not be running)
+  prov_log_info("Starting and enabling Caddy service for automatic startup...")
   tryCatch({
     # Stop any existing service first
     droplet_ssh(droplet, "sudo snap stop caddy.server 2>/dev/null || true")
-    
-    # Start the service
-    start_result <- capture.output(droplet_ssh(droplet, "sudo snap start caddy.server && echo 'START_SUCCESS' || echo 'START_FAILED'"))
+
+    # Start the service and enable it for automatic startup on boot
+    # Using 'snap start --enable' ensures the service starts now AND on boot
+    start_result <- capture.output(droplet_ssh(droplet, "sudo snap start --enable caddy && echo 'START_SUCCESS' || echo 'START_FAILED'"))
     start_result <- paste(start_result, collapse = " ")
-    
+
     if (!grepl("START_SUCCESS", start_result)) {
-      prov_log_error("Failed to start Caddy service:", start_result)
-      stop("❌ CRITICAL: Failed to start Caddy service")
+      prov_log_error("Failed to start and enable Caddy service:", start_result)
+      stop("❌ CRITICAL: Failed to start and enable Caddy service")
     }
-    
+
     # Verify service is running
     Sys.sleep(3) # Brief wait for service to initialize
     status_result <- capture.output(droplet_ssh(droplet, "snap services caddy | grep caddy.server | grep active && echo 'STATUS_SUCCESS' || echo 'STATUS_FAILED'"))
     status_result <- paste(status_result, collapse = " ")
-    
+
     if (!grepl("STATUS_SUCCESS", status_result)) {
       prov_log_error("Caddy service failed to start properly:", status_result)
-      
+
       # Get detailed logs for troubleshooting
       logs_result <- capture.output(droplet_ssh(droplet, "journalctl -u snap.caddy.server --no-pager -n 10"))
       prov_log_error("Caddy service logs:", paste(logs_result, collapse = " "))
-      
+
       stop("❌ CRITICAL: Caddy service is not running after start command")
     }
-    
-    prov_log_success("Caddy service started successfully")
-  }, error = function(e) {
-    prov_log_error("Failed to start Caddy service:", e$message)
-    stop("❌ CRITICAL: Caddy service startup failed - ", e$message)
-  })
-  
-  # Enable Caddy service for automatic startup on boot
-  prov_log_info("Enabling Caddy service for automatic startup...")
-  tryCatch({
-    enable_result <- capture.output(droplet_ssh(droplet, "sudo systemctl enable snap.caddy.server && echo 'ENABLE_SUCCESS' || echo 'ENABLE_FAILED'"))
-    enable_result <- paste(enable_result, collapse = " ")
-    
-    if (!grepl("ENABLE_SUCCESS", enable_result)) {
-      prov_log_error("Failed to enable Caddy service for auto-start:", enable_result)
-      stop("❌ CRITICAL: Failed to enable Caddy service for automatic startup")
-    }
-    
-    # Verify service is enabled
-    enabled_check <- capture.output(droplet_ssh(droplet, "systemctl is-enabled snap.caddy.server && echo 'VERIFY_SUCCESS' || echo 'VERIFY_FAILED'"))
+
+    # Verify service is enabled (should show "enabled" in snap services output)
+    enabled_check <- capture.output(droplet_ssh(droplet, "snap services caddy | grep caddy.server | grep enabled && echo 'VERIFY_SUCCESS' || echo 'VERIFY_FAILED'"))
     enabled_check <- paste(enabled_check, collapse = " ")
-    
+
     if (!grepl("VERIFY_SUCCESS", enabled_check)) {
       prov_log_error("Caddy service enable verification failed:", enabled_check)
       stop("❌ CRITICAL: Caddy service is not enabled for automatic startup")
     }
-    
-    prov_log_success("Caddy service enabled for automatic startup on boot")
+
+    prov_log_success("Caddy service started and enabled for automatic startup on boot")
   }, error = function(e) {
-    prov_log_error("Failed to enable Caddy service:", e$message)
-    stop("❌ CRITICAL: Caddy service enable failed - ", e$message)
+    prov_log_error("Failed to start and enable Caddy service:", e$message)
+    stop("❌ CRITICAL: Caddy service startup and enable failed - ", e$message)
   })
   
   # Verify Caddy is listening on expected ports
