@@ -69,10 +69,34 @@ get_ncbi_common_name <- function(taxonomic_name) {
     }
 
     # Singularize the common name since taxonomic nodes represent a single ancestor
-    singularized_name <- singularize(selected_common_name)
+    # Special handling for compound names containing "&" or "and"
+    if (grepl("&|\\band\\b", selected_common_name, ignore.case = TRUE)) {
+      # Split on delimiters: &, and, commas
+      words <- unlist(strsplit(selected_common_name, "\\s*[&,]\\s*|\\s+and\\s+", perl = TRUE))
 
-    # Convert to proper case (capitalize first letter)
-    common_name <- paste0(toupper(substring(singularized_name, 1, 1)), substring(singularized_name, 2))
+      # Filter out empty strings and common connector words
+      words <- words[nchar(trimws(words)) > 0]
+      words <- words[!tolower(trimws(words)) %in% c("and", "or", "the")]
+
+      # Singularize each word separately
+      singularized_words <- sapply(words, function(word) {
+        trimmed <- trimws(word)
+        singularize(trimmed)
+      })
+
+      # Capitalize first letter of each word
+      capitalized_words <- sapply(singularized_words, function(word) {
+        paste0(toupper(substring(word, 1, 1)), substring(word, 2))
+      })
+
+      # Join with slashes
+      common_name <- paste(capitalized_words, collapse = "/")
+    } else {
+      # Simple name: singularize the whole string
+      singularized_name <- singularize(selected_common_name)
+      # Convert to proper case (capitalize first letter)
+      common_name <- paste0(toupper(substring(singularized_name, 1, 1)), substring(singularized_name, 2))
+    }
 
     return(common_name)
 
